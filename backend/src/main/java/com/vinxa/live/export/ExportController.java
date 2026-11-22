@@ -58,7 +58,29 @@ public class ExportController {
         sb.append("- **Date:** ").append(meeting.getCreatedAt()).append("\n\n");
 
         if (summary != null) {
-            sb.append("## Executive Summary\n").append(summary.getSummary()).append("\n\n");
+            try {
+                com.fasterxml.jackson.databind.JsonNode root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(summary.getSummary());
+                if (root.has("overview")) {
+                    sb.append("## Executive Summary\n\n").append(root.get("overview").asText()).append("\n\n");
+                }
+                if (root.has("keyPoints") && root.get("keyPoints").isArray()) {
+                    sb.append("### Key Discussion Points\n");
+                    for (com.fasterxml.jackson.databind.JsonNode kp : root.get("keyPoints")) {
+                        sb.append("- ").append(kp.asText()).append("\n");
+                    }
+                    sb.append("\n");
+                }
+                if (root.has("decisions") && root.get("decisions").isArray()) {
+                    sb.append("### Key Decisions\n");
+                    for (com.fasterxml.jackson.databind.JsonNode d : root.get("decisions")) {
+                        sb.append("- **").append(d.path("decision").asText()).append("**: ")
+                          .append(d.path("reason").asText()).append("\n");
+                    }
+                    sb.append("\n");
+                }
+            } catch (Exception e) {
+                sb.append("## Executive Summary\n\n").append(summary.getSummary()).append("\n\n");
+            }
         }
 
         sb.append("## Action Items\n");
@@ -75,7 +97,8 @@ public class ExportController {
 
         sb.append("## Diarized Transcript\n");
         for (TranscriptSegment seg : segments) {
-            sb.append("**[").append(seg.getStartMs() / 1000).append("s]**: ").append(seg.getContent()).append("\n\n");
+            String speaker = seg.getParticipant() != null ? seg.getParticipant().getDisplayName() : "Speaker";
+            sb.append("**[").append(seg.getStartMs() / 1000).append("s] ").append(speaker).append("**: ").append(seg.getContent()).append("\n\n");
         }
 
         String filename = meeting.getTitle().toLowerCase().replaceAll("[^a-z0-9]", "-") + ".md";

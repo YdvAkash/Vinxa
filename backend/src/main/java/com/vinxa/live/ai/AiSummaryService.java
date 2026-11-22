@@ -66,20 +66,35 @@ public class AiSummaryService {
         Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
         if (meeting == null) return;
 
-        meeting.updateStatus(MeetingStatus.ANALYSIS_PENDING);
-        meetingRepository.save(meeting);
+        if (meeting.getStatus().canTransitionTo(MeetingStatus.ANALYSIS_PENDING)) {
+            meeting.updateStatus(MeetingStatus.ANALYSIS_PENDING);
+            meetingRepository.save(meeting);
+        }
 
         List<TranscriptSegment> segments = transcriptSegmentRepository.findByMeetingIdOrderByStartMsAsc(meetingId);
 
         AiSummaryResponse response = null;
 
-        // Call Gemini API if API key is configured
-        if (!geminiApiKey.isEmpty()) {
-            try {
-                log.info("Requesting meeting analysis from Google Gemini ({}) for meeting {}", geminiModel, meetingId);
-                response = callGeminiApi(meeting, segments);
-            } catch (Exception ex) {
-                log.warn("Gemini API call failed: {}. Falling back to deterministic synthesis.", ex.getMessage());
+        // If no audio segments were captured, generate empty/initial summary directly
+        if (segments.isEmpty()) {
+            response = synthesizeFallbackAnalysis(meeting, segments);
+        } else if (!geminiApiKey.isEmpty()) {
+            // Try candidate models in order if one experiences high demand (503/429)
+            List<String> candidateModels = new ArrayList<>();
+            candidateModels.add(geminiModel);
+            if (!geminiModel.equals("gemini-flash-lite-latest")) candidateModels.add("gemini-flash-lite-latest");
+            if (!geminiModel.equals("gemini-3.5-flash-lite")) candidateModels.add("gemini-3.5-flash-lite");
+
+            for (String modelToTry : candidateModels) {
+                try {
+                    log.info("Requesting meeting analysis from Google Gemini ({}) for meeting {}", modelToTry, meetingId);
+                    response = callGeminiApiWithModel(meeting, segments, modelToTry);
+                    if (response != null) {
+                        break;
+                    }
+                } catch (Exception ex) {
+                    log.warn("Gemini model {} failed ({}). Attempting next candidate or fallback.", modelToTry, ex.getMessage());
+                }
             }
         }
 
@@ -117,7 +132,7 @@ public class AiSummaryService {
         }
     }
 
-    private AiSummaryResponse callGeminiApi(Meeting meeting, List<TranscriptSegment> segments) throws Exception {
+    private AiSummaryResponse callGeminiApiWithModel(Meeting meeting, List<TranscriptSegment> segments, String modelName) throws Exception {
         StringBuilder transcriptText = new StringBuilder();
         for (TranscriptSegment seg : segments) {
             String speaker = seg.getParticipant() != null ? seg.getParticipant().getDisplayName() : "Speaker";
@@ -151,7 +166,7 @@ public class AiSummaryService {
         );
 
         String jsonPayload = objectMapper.writeValueAsString(requestBody);
-        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent?key=" + geminiApiKey;
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint))
@@ -165,11 +180,13 @@ public class AiSummaryService {
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             JsonNode root = objectMapper.readTree(response.body());
             JsonNode textNode = root.path("candidates").get(0).path("content").path("parts").get(0).path("text");
-            String rawJson = textNode.asText("");
+            String rawJson = textNode.asText("").trim();
 
             // Clean markdown fences if any
             if (rawJson.startsWith("```json")) {
                 rawJson = rawJson.substring(7);
+            } else if (rawJson.startsWith("```")) {
+                rawJson = rawJson.substring(3);
             }
             if (rawJson.endsWith("```")) {
                 rawJson = rawJson.substring(0, rawJson.length() - 3);

@@ -24,4 +24,4 @@ vinxa:
     api-key: ${DEEPGRAM_API_KEY:e021ff3eee8696d392fe3ef7ca929ddcc8c076db}
   gemini:
     api-key: ${GEMINI_API_KEY:AQ.Ab8RN6Jsm5QfEi5vlcX0XBhXRAg97s1J_8qBcR9F3gmdj0_ICQ}
-    model: ${GEMINI_MODEL:gemini-1.5-flash}
+    model: ${GEMINI_MODEL:gemini-flash-lite-latest}

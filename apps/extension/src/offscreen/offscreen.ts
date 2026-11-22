@@ -1,16 +1,17 @@
 let mediaStream: MediaStream | null = null;
+let micStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
 let websocket: WebSocket | null = null;
 
 chrome.runtime.onMessage.addListener(async (message) => {
   if (message.type === 'START_OFFSCREEN_CAPTURE') {
-    await startCapture(message.streamId, message.meetingId);
+    await startCapture(message.streamId, message.meetingId, message.ticket);
   } else if (message.type === 'STOP_OFFSCREEN_CAPTURE') {
     stopCapture();
   }
 });
 
-async function startCapture(streamId: string, meetingId: string) {
+async function startCapture(streamId: string, meetingId: string, ticket?: string) {
   try {
     // 1. Acquire MediaStream using the streamId from tabCapture
     mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -25,11 +26,12 @@ async function startCapture(streamId: string, meetingId: string) {
 
     // 2. Preserve audible playback to local speaker
     audioContext = new AudioContext({ sampleRate: 16000 });
-    const sourceNode = audioContext.createMediaStreamSource(mediaStream);
-    sourceNode.connect(audioContext.destination);
+    const tabSource = audioContext.createMediaStreamSource(mediaStream);
+    tabSource.connect(audioContext.destination);
 
     // 3. Setup WebSocket connection to Vinxa backend
-    websocket = new WebSocket(`ws://localhost:8080/ws/audio?meetingId=${encodeURIComponent(meetingId)}`);
+    const ticketParam = ticket ? `&ticket=${encodeURIComponent(ticket)}` : '';
+    websocket = new WebSocket(`ws://localhost:8080/ws/audio?meetingId=${encodeURIComponent(meetingId)}${ticketParam}`);
     websocket.binaryType = 'arraybuffer';
 
     websocket.onopen = () => {
@@ -43,9 +45,21 @@ async function startCapture(streamId: string, meetingId: string) {
       }));
     };
 
-    // 4. Capture raw PCM16 audio via ScriptProcessorNode / AudioWorklet
+    // 4. Capture raw PCM16 audio via ScriptProcessorNode
     const processor = audioContext.createScriptProcessor(4096, 1, 1);
-    sourceNode.connect(processor);
+    tabSource.connect(processor);
+
+    // 5. Attempt capturing local microphone to mix user's own speech
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const micSource = audioContext.createMediaStreamSource(micStream);
+      // Connect mic to processor only, NOT destination (prevents hearing self echo)
+      micSource.connect(processor);
+      console.log('Vinxa Live: Mixed local microphone into meeting audio stream.');
+    } catch (micErr) {
+      console.warn('Vinxa Live: Local microphone capture unavailable, continuing with tab audio only.', micErr);
+    }
+
     processor.connect(audioContext.destination);
 
     processor.onaudioprocess = (e) => {
@@ -56,9 +70,8 @@ async function startCapture(streamId: string, meetingId: string) {
       const view = new DataView(pcm16Buffer);
 
       for (let i = 0; i < inputData.length; i++) {
-        // Clamp and convert float32 [-1.0, 1.0] to int16 [-32768, 32767]
         const s = Math.max(-1, Math.min(1, inputData[i]));
-        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true); // little-endian
+        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true); // linear16
       }
 
       websocket.send(pcm16Buffer);
@@ -78,6 +91,11 @@ function stopCapture() {
   if (mediaStream) {
     mediaStream.getTracks().forEach((track) => track.stop());
     mediaStream = null;
+  }
+
+  if (micStream) {
+    micStream.getTracks().forEach((track) => track.stop());
+    micStream = null;
   }
 
   if (audioContext && audioContext.state !== 'closed') {

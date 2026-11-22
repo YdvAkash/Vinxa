@@ -1,8 +1,17 @@
 package com.vinxa.live.realtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vinxa.live.meeting.Meeting;
+import com.vinxa.live.meeting.MeetingRepository;
+import com.vinxa.live.meeting.MeetingStatus;
+import com.vinxa.live.participant.Participant;
+import com.vinxa.live.participant.ParticipantRepository;
 import com.vinxa.live.stt.SpeechToTextProvider;
 import com.vinxa.live.stt.TranscriptEvent;
+import com.vinxa.live.transcript.TranscriptSegment;
+import com.vinxa.live.transcript.TranscriptSegmentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
@@ -18,16 +27,30 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class AudioWebSocketHandler extends AbstractWebSocketHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(AudioWebSocketHandler.class);
+
     private final SpeechToTextProvider sttProvider;
     private final EventWebSocketHandler eventWebSocketHandler;
+    private final MeetingRepository meetingRepository;
+    private final ParticipantRepository participantRepository;
+    private final TranscriptSegmentRepository transcriptSegmentRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final Map<String, UUID> sessionToMeetingMap = new ConcurrentHashMap<>();
     private final Map<UUID, Long> frameCounters = new ConcurrentHashMap<>();
 
-    public AudioWebSocketHandler(SpeechToTextProvider sttProvider, EventWebSocketHandler eventWebSocketHandler) {
+    public AudioWebSocketHandler(
+            SpeechToTextProvider sttProvider,
+            EventWebSocketHandler eventWebSocketHandler,
+            MeetingRepository meetingRepository,
+            ParticipantRepository participantRepository,
+            TranscriptSegmentRepository transcriptSegmentRepository
+    ) {
         this.sttProvider = sttProvider;
         this.eventWebSocketHandler = eventWebSocketHandler;
+        this.meetingRepository = meetingRepository;
+        this.participantRepository = participantRepository;
+        this.transcriptSegmentRepository = transcriptSegmentRepository;
     }
 
     @Override
@@ -36,11 +59,58 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         if (meetingId != null) {
             sessionToMeetingMap.put(session.getId(), meetingId);
             frameCounters.put(meetingId, 0L);
+            log.info("Audio WebSocket connected for meeting {}", meetingId);
+
+            Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
+            if (meeting != null && meeting.getStatus().canTransitionTo(MeetingStatus.RECORDING)) {
+                meeting.updateStatus(MeetingStatus.RECORDING);
+                meetingRepository.save(meeting);
+            }
 
             sttProvider.startSession(meetingId, (TranscriptEvent event) -> {
-                eventWebSocketHandler.broadcastToMeeting(meetingId, event);
+                handleTranscriptEvent(meetingId, event);
             });
         }
+    }
+
+    private void handleTranscriptEvent(UUID meetingId, TranscriptEvent event) {
+        try {
+            if (event.isFinal()) {
+                Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
+                if (meeting != null) {
+                    if (meeting.getStatus() != MeetingStatus.RECORDING && meeting.getStatus().canTransitionTo(MeetingStatus.RECORDING)) {
+                        meeting.updateStatus(MeetingStatus.RECORDING);
+                        meetingRepository.save(meeting);
+                    }
+
+                    // Find or create participant
+                    Participant participant = participantRepository.findByMeetingIdAndSpeakerKey(meetingId, event.speakerKey())
+                            .orElseGet(() -> {
+                                Participant p = new Participant(UUID.randomUUID(), meeting, event.speakerKey(), event.speakerName());
+                                return participantRepository.save(p);
+                            });
+
+                    // Save segment to Neon PostgreSQL
+                    TranscriptSegment segment = new TranscriptSegment(
+                            event.segmentId() != null ? event.segmentId() : UUID.randomUUID(),
+                            meeting,
+                            participant,
+                            event.segmentId() != null ? event.segmentId().toString() : UUID.randomUUID().toString(),
+                            event.text(),
+                            event.startMs(),
+                            event.endMs(),
+                            (float) event.confidence(),
+                            true
+                    );
+                    transcriptSegmentRepository.save(segment);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed saving transcript segment to DB: {}", e.getMessage());
+        }
+
+        // Broadcast event in real time to connected dashboard clients
+        eventWebSocketHandler.broadcastToMeeting(meetingId, event);
     }
 
     @Override
@@ -52,6 +122,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         String type = (String) map.get("type");
 
         if ("STOP_SESSION".equals(type)) {
+            log.info("Received STOP_SESSION frame for meeting {}", meetingId);
             sttProvider.stopSession(meetingId);
         }
     }
@@ -61,7 +132,10 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         UUID meetingId = sessionToMeetingMap.get(session.getId());
         if (meetingId == null) return;
 
-        byte[] payload = message.getPayload().array();
+        java.nio.ByteBuffer buffer = message.getPayload();
+        byte[] payload = new byte[buffer.remaining()];
+        buffer.get(payload);
+
         frameCounters.compute(meetingId, (k, v) -> (v == null ? 0L : v) + payload.length);
         sttProvider.sendAudioChunk(meetingId, payload);
     }
@@ -70,6 +144,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         UUID meetingId = sessionToMeetingMap.remove(session.getId());
         if (meetingId != null) {
+            log.info("Audio WebSocket closed for meeting {}", meetingId);
             sttProvider.stopSession(meetingId);
         }
     }

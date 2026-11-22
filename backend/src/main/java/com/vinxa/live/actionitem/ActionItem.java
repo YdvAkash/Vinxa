@@ -15,6 +15,7 @@ public class ActionItem {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "meeting_id", nullable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private Meeting meeting;
 
     @Column(name = "title", nullable = false)

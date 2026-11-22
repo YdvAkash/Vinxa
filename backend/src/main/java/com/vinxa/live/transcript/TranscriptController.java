@@ -64,6 +64,49 @@ public class TranscriptController {
         return ResponseEntity.ok(dtos);
     }
 
+    @PostMapping("/transcript")
+    public ResponseEntity<TranscriptSegmentDto> appendTranscriptSegment(
+            @PathVariable("id") UUID meetingId,
+            @RequestBody Map<String, Object> body
+    ) {
+        User user = SecurityUtils.getCurrentUser();
+        Meeting meeting = meetingService.getMeetingAndVerifyOwnership(user, meetingId);
+
+        String speakerKey = (String) body.getOrDefault("speakerKey", "speaker-1");
+        String speakerName = (String) body.getOrDefault("speakerName", "Speaker 1");
+        String text = (String) body.getOrDefault("text", "");
+        Long startMs = body.get("startMs") != null ? ((Number) body.get("startMs")).longValue() : 0L;
+        Long endMs = body.get("endMs") != null ? ((Number) body.get("endMs")).longValue() : startMs + 2000L;
+
+        Participant participant = participantRepository.findByMeetingIdAndSpeakerKey(meetingId, speakerKey)
+                .orElseGet(() -> participantRepository.save(new Participant(UUID.randomUUID(), meeting, speakerKey, speakerName)));
+
+        TranscriptSegment segment = new TranscriptSegment(
+                UUID.randomUUID(),
+                meeting,
+                participant,
+                UUID.randomUUID().toString(),
+                text,
+                startMs,
+                endMs,
+                0.98f,
+                true
+        );
+        segment = transcriptSegmentRepository.save(segment);
+
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(new TranscriptSegmentDto(
+                segment.getId(),
+                meetingId,
+                speakerKey,
+                participant.getDisplayName(),
+                segment.getContent(),
+                segment.getStartMs(),
+                segment.getEndMs(),
+                segment.getFinal(),
+                segment.getConfidence()
+        ));
+    }
+
     @GetMapping("/summary")
     public ResponseEntity<MeetingSummaryDto> getSummary(@PathVariable("id") UUID meetingId) {
         User user = SecurityUtils.getCurrentUser();
@@ -78,12 +121,39 @@ public class TranscriptController {
     }
 
     @GetMapping("/actions")
-    public ResponseEntity<List<ActionItem>> getActionItems(@PathVariable("id") UUID meetingId) {
+    public ResponseEntity<List<ActionItemDto>> getActionItems(@PathVariable("id") UUID meetingId) {
         User user = SecurityUtils.getCurrentUser();
         meetingService.getMeetingAndVerifyOwnership(user, meetingId);
 
-        return ResponseEntity.ok(actionItemRepository.findByMeetingIdOrderByCreatedAtAsc(meetingId));
+        List<ActionItem> items = actionItemRepository.findByMeetingIdOrderByCreatedAtAsc(meetingId);
+        List<ActionItemDto> dtos = items.stream()
+                .map(i -> new ActionItemDto(
+                        i.getId(),
+                        i.getMeeting().getId(),
+                        i.getTitle(),
+                        i.getAssignee(),
+                        i.getDeadline() != null ? i.getDeadline().toString() : null,
+                        i.getPriority(),
+                        i.getStatus(),
+                        i.getEvidenceSegmentIds(),
+                        i.getCreatedAt() != null ? i.getCreatedAt().toString() : null
+                ))
+                .toList();
+
+        return ResponseEntity.ok(dtos);
     }
+
+    public record ActionItemDto(
+            UUID id,
+            UUID meetingId,
+            String title,
+            String assignee,
+            String deadline,
+            String priority,
+            String status,
+            String evidenceSegmentIds,
+            String createdAt
+    ) {}
 
     @PatchMapping("/participants/{participantId}")
     public ResponseEntity<Participant> renameParticipant(

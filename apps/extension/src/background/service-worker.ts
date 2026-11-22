@@ -17,8 +17,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'TAB_PLATFORM_DETECTED') {
+    if (currentState === 'IDLE' || currentState === 'PLATFORM_DETECTED') {
+      currentState = 'PLATFORM_DETECTED';
+      activeMeetingPlatform = message.platform;
+      if (_sender.tab?.id) {
+        activeTabId = _sender.tab.id;
+      }
+    }
+    return true;
+  }
+
   if (message.type === 'START_CAPTURE') {
-    handleStartCapture(message.tabId, message.platform, message.meetingId)
+    handleStartCapture(message.tabId, message.platform, message.meetingId, message.ticket)
       .then((res) => sendResponse({ success: true, res }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -32,7 +43,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-async function handleStartCapture(tabId: number, platform: MeetingPlatform, meetingId: string) {
+async function handleStartCapture(tabId: number, platform: MeetingPlatform, meetingId: string, ticket?: string) {
   currentState = 'STARTING';
   activeTabId = tabId;
   activeMeetingPlatform = platform;
@@ -56,7 +67,8 @@ async function handleStartCapture(tabId: number, platform: MeetingPlatform, meet
   chrome.runtime.sendMessage({
     type: 'START_OFFSCREEN_CAPTURE',
     streamId,
-    meetingId
+    meetingId,
+    ticket
   });
 
   currentState = 'RECORDING';

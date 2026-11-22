@@ -1,27 +1,58 @@
-import React, { useState } from 'react';
-import { Meeting, TranscriptSegment } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Meeting, TranscriptSegment, MeetingSummary, ActionItem } from '../types';
 import { SummaryView } from '../components/meetings/SummaryView';
 import { ActionItemsView } from '../components/meetings/ActionItemsView';
 import { TranscriptFeed } from '../components/transcript/TranscriptFeed';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { PlatformBadge } from '../components/ui/PlatformBadge';
+import { api } from '../services/api';
 import { Download, Trash2, ArrowLeft, FileText, CheckSquare, ListOrdered, Share2 } from 'lucide-react';
 
 interface MeetingDetailsPageProps {
   meeting: Meeting;
-  transcript: TranscriptSegment[];
   onBack: () => void;
   onDelete: (meetingId: string) => void;
 }
 
 export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
   meeting,
-  transcript,
   onBack,
   onDelete
 }) => {
   const [activeTab, setActiveTab] = useState<'summary' | 'actionItems' | 'transcript'>('summary');
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
+
+  const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
+  const [summary, setSummary] = useState<MeetingSummary | undefined>(meeting.summary);
+  const [actionItems, setActionItems] = useState<ActionItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadData() {
+      setLoading(true);
+      try {
+        const [transcripts, sum, actions] = await Promise.all([
+          api.getTranscript(meeting.id),
+          api.getSummary(meeting.id),
+          api.getActionItems(meeting.id)
+        ]);
+
+        if (isMounted) {
+          setTranscript(transcripts);
+          if (sum) setSummary(sum);
+          setActionItems(actions);
+        }
+      } catch (err) {
+        console.error('Failed loading meeting details:', err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    loadData();
+    return () => { isMounted = false; };
+  }, [meeting.id]);
 
   const handleEvidenceClick = (segmentId: string) => {
     setActiveTab('transcript');
@@ -34,8 +65,8 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
 
   const handleExport = (format: 'md' | 'json') => {
     const data = format === 'md'
-      ? `# Meeting Notes: ${meeting.title}\n\n## Overview\n${meeting.summary?.overview || ''}\n\n## Decisions\n${meeting.summary?.decisions.map(d => `- ${d.decision} (Reason: ${d.reason})`).join('\n') || ''}`
-      : JSON.stringify({ meeting, transcript }, null, 2);
+      ? `# Meeting Notes: ${meeting.title}\n\n## Overview\n${summary?.overview || ''}\n\n## Decisions\n${summary?.decisions?.map(d => `- ${d.decision} (Reason: ${d.reason})`).join('\n') || ''}`
+      : JSON.stringify({ meeting, summary, actionItems, transcript }, null, 2);
 
     const blob = new Blob([data], { type: format === 'md' ? 'text/markdown' : 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -78,7 +109,7 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
             className="px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-xs font-medium text-red-400 border border-red-500/20 flex items-center space-x-1.5 transition"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>Delete Meeting Data</span>
+            <span>Delete Meeting</span>
           </button>
         </div>
       </div>
@@ -91,7 +122,7 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
           <span className="text-xs text-slate-500 font-mono">Created {new Date(meeting.createdAt).toLocaleString()}</span>
         </div>
         <h1 className="text-2xl font-bold text-white tracking-tight">{meeting.title}</h1>
-        <p className="text-xs text-slate-400 font-mono">URL: {meeting.meetingUrl}</p>
+        {meeting.meetingUrl && <p className="text-xs text-slate-400 font-mono">URL: {meeting.meetingUrl}</p>}
       </div>
 
       {/* Tabs */}
@@ -117,7 +148,7 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
           }`}
         >
           <CheckSquare className="w-4 h-4" />
-          <span>Action Items ({meeting.summary?.actionItems.length || 0})</span>
+          <span>Action Items ({actionItems.length})</span>
         </button>
 
         <button
@@ -135,25 +166,39 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
 
       {/* Tab Panels */}
       <div>
-        {activeTab === 'summary' && (
-          <SummaryView summary={meeting.summary} onEvidenceClick={handleEvidenceClick} />
-        )}
-
-        {activeTab === 'actionItems' && (
-          <ActionItemsView
-            actionItems={meeting.summary?.actionItems}
-            onEvidenceClick={handleEvidenceClick}
-          />
-        )}
-
-        {activeTab === 'transcript' && (
-          <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800">
-            <TranscriptFeed
-              segments={transcript}
-              highlightedId={highlightedSegmentId}
-              onSelectSegment={(id) => setHighlightedSegmentId(id)}
-            />
+        {loading ? (
+          <div className="py-12 text-center text-slate-400 text-xs animate-pulse">
+            Loading meeting data from Neon Cloud database...
           </div>
+        ) : (
+          <>
+            {activeTab === 'summary' && (
+              <SummaryView summary={summary} onEvidenceClick={handleEvidenceClick} />
+            )}
+
+            {activeTab === 'actionItems' && (
+              <ActionItemsView
+                actionItems={actionItems}
+                onEvidenceClick={handleEvidenceClick}
+              />
+            )}
+
+            {activeTab === 'transcript' && (
+              <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800">
+                {transcript.length === 0 ? (
+                  <p className="text-center text-slate-500 text-xs py-8">
+                    No transcript segments recorded for this meeting.
+                  </p>
+                ) : (
+                  <TranscriptFeed
+                    segments={transcript}
+                    highlightedId={highlightedSegmentId}
+                    onSelectSegment={(id) => setHighlightedSegmentId(id)}
+                  />
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

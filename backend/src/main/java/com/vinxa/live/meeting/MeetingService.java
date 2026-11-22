@@ -98,7 +98,10 @@ public class MeetingService {
 
     public MeetingResponse stopMeeting(User user, UUID meetingId) {
         Meeting meeting = getMeetingAndVerifyOwnership(user, meetingId);
-        if (meeting.getStatus() == MeetingStatus.RECORDING) {
+        if (meeting.getStatus() == MeetingStatus.RECORDING || meeting.getStatus() == MeetingStatus.READY) {
+            if (meeting.getStatus() == MeetingStatus.READY) {
+                meeting.updateStatus(MeetingStatus.RECORDING);
+            }
             meeting.updateStatus(MeetingStatus.STOPPING);
             meeting.updateStatus(MeetingStatus.FINALIZING);
             meeting.updateStatus(MeetingStatus.COMPLETED);

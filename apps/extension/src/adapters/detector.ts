@@ -9,7 +9,7 @@ export function detectPlatformFromUrl(urlString: string): MeetingPlatform {
       return 'GOOGLE_MEET';
     }
 
-    if (hostname === 'teams.microsoft.com' || hostname.endsWith('.teams.microsoft.com')) {
+    if (hostname === 'teams.microsoft.com' || hostname.endsWith('.teams.microsoft.com') || hostname === 'teams.live.com') {
       return 'MICROSOFT_TEAMS';
     }
 

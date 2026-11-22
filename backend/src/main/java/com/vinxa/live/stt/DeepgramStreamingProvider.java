@@ -33,6 +33,7 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
     private final Map<UUID, WebSocket> activeSockets = new ConcurrentHashMap<>();
     private final Map<UUID, Consumer<TranscriptEvent>> activeConsumers = new ConcurrentHashMap<>();
     private final Map<UUID, StringBuilder> messageBuffers = new ConcurrentHashMap<>();
+    private final Map<UUID, java.util.concurrent.CompletableFuture<?>> sendPipelines = new ConcurrentHashMap<>();
 
     public DeepgramStreamingProvider(
             @Value("${vinxa.deepgram.api-key:}") String apiKey,
@@ -81,11 +82,18 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
     public void sendAudioChunk(UUID meetingId, byte[] pcm16Data) {
         WebSocket ws = activeSockets.get(meetingId);
         if (ws != null) {
-            try {
-                ws.sendBinary(ByteBuffer.wrap(pcm16Data), true);
-            } catch (Exception e) {
-                log.warn("Failed sending audio chunk to Deepgram: {}", e.getMessage());
-            }
+            ByteBuffer buf = ByteBuffer.wrap(pcm16Data);
+            sendPipelines.compute(meetingId, (id, currentStage) -> {
+                if (currentStage == null || currentStage.isDone()) {
+                    return ws.sendBinary(buf, true);
+                } else {
+                    return currentStage.thenCompose(v -> ws.sendBinary(buf, true))
+                            .exceptionally(ex -> {
+                                log.debug("Deepgram frame send error: {}", ex.getMessage());
+                                return null;
+                            });
+                }
+            });
         } else {
             fallbackProvider.sendAudioChunk(meetingId, pcm16Data);
         }
@@ -93,13 +101,28 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
 
     @Override
     public void stopSession(UUID meetingId) {
+        sendPipelines.remove(meetingId);
         WebSocket ws = activeSockets.remove(meetingId);
         if (ws != null) {
             try {
-                // Deepgram empty buffer close signal
-                ws.sendBinary(ByteBuffer.allocate(0), true);
-                ws.sendClose(WebSocket.NORMAL_CLOSURE, "Session ended");
-            } catch (Exception ignored) {}
+                // Deepgram empty buffer close signal to flush transcription pipeline
+                ws.sendBinary(ByteBuffer.allocate(0), true)
+                        .thenRun(() -> {
+                            try {
+                                ws.sendClose(WebSocket.NORMAL_CLOSURE, "Session ended");
+                            } catch (Exception e1) {}
+                        })
+                        .exceptionally(ex -> {
+                            try {
+                                ws.sendClose(WebSocket.NORMAL_CLOSURE, "Session ended");
+                            } catch (Exception e2) {}
+                            return null;
+                        });
+            } catch (Exception e3) {
+                try {
+                    ws.sendClose(WebSocket.NORMAL_CLOSURE, "Session ended");
+                } catch (Exception e4) {}
+            }
         }
         activeConsumers.remove(meetingId);
         messageBuffers.remove(meetingId);
@@ -111,6 +134,12 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
 
         public DeepgramWebSocketListener(UUID meetingId) {
             this.meetingId = meetingId;
+        }
+
+        @Override
+        public void onOpen(WebSocket webSocket) {
+            log.info("Deepgram Live STT WebSocket channel opened for meeting {}", meetingId);
+            webSocket.request(1);
         }
 
         @Override

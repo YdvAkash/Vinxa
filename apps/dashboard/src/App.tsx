@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { Overview } from './pages/Overview';
@@ -6,43 +6,77 @@ import { LiveMeetingPage } from './pages/LiveMeetingPage';
 import { MeetingDetailsPage } from './pages/MeetingDetailsPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { mockMeetings, mockTranscript } from './services/mockData';
+import { api } from './services/api';
 import { Meeting } from './types';
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<NavTab>('overview');
-  const [meetings, setMeetings] = useState<Meeting[]>(mockMeetings);
-  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(mockMeetings[0]);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const liveMeeting = meetings.find((m) => m.status === 'RECORDING') || meetings[1];
+  const fetchMeetings = async () => {
+    try {
+      const data = await api.getMeetings();
+      setMeetings(data);
+      if (data.length > 0 && !selectedMeeting) {
+        setSelectedMeeting(data[0]);
+      }
+    } catch (err) {
+      console.warn('Backend meetings check:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMeetings();
+    const interval = setInterval(fetchMeetings, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const liveMeeting = meetings.find((m) => m.status === 'RECORDING') || (meetings.length > 0 ? meetings[0] : null);
 
   const handleSelectMeeting = (meeting: Meeting) => {
     setSelectedMeeting(meeting);
     setCurrentTab('details');
   };
 
-  const handleStopMeeting = () => {
-    setMeetings((prev) =>
-      prev.map((m) =>
-        m.id === liveMeeting.id
-          ? { ...m, status: 'ANALYSIS_COMPLETED', endedAt: new Date().toISOString() }
-          : m
-      )
-    );
+  const handleCreateMeeting = async (title: string, platform: string, url: string) => {
+    const newMeeting = await api.createMeeting(title, platform, url);
+    await fetchMeetings();
+    setSelectedMeeting(newMeeting);
+    setCurrentTab('live');
   };
 
-  const handleDeleteMeeting = (meetingId: string) => {
-    setMeetings((prev) => prev.filter((m) => m.id !== meetingId));
-    if (selectedMeeting?.id === meetingId) {
-      setSelectedMeeting(null);
-      setCurrentTab('overview');
+  const handleStopMeeting = async () => {
+    if (!liveMeeting) return;
+    try {
+      await api.stopMeeting(liveMeeting.id);
+      await fetchMeetings();
+      setCurrentTab('details');
+    } catch (err) {
+      console.error('Stop meeting error:', err);
+    }
+  };
+
+  const handleDeleteMeeting = async (meetingId: string) => {
+    try {
+      await api.deleteMeeting(meetingId);
+      await fetchMeetings();
+      if (selectedMeeting?.id === meetingId) {
+        setSelectedMeeting(null);
+        setCurrentTab('overview');
+      }
+    } catch (err) {
+      console.error('Delete meeting error:', err);
     }
   };
 
   const filteredMeetings = meetings.filter((m) =>
     m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.summary?.overview.toLowerCase().includes(searchQuery.toLowerCase())
+    m.platform.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -58,39 +92,47 @@ export const App: React.FC = () => {
 
         <main className="flex-1 overflow-y-auto p-8">
           <div className="max-w-6xl mx-auto">
-            {currentTab === 'overview' && (
-              <Overview
-                meetings={filteredMeetings}
-                onSelectMeeting={handleSelectMeeting}
-                onGoToLive={() => setCurrentTab('live')}
-              />
-            )}
+            {loading && meetings.length === 0 ? (
+              <div className="py-24 text-center text-slate-400 text-sm animate-pulse">
+                Connecting to Vinxa Live Cloud Service...
+              </div>
+            ) : (
+              <>
+                {currentTab === 'overview' && (
+                  <Overview
+                    meetings={filteredMeetings}
+                    onSelectMeeting={handleSelectMeeting}
+                    onGoToLive={() => setCurrentTab('live')}
+                    onCreateMeeting={handleCreateMeeting}
+                  />
+                )}
 
-            {currentTab === 'live' && (
-              <LiveMeetingPage
-                meeting={liveMeeting}
-                transcript={mockTranscript}
-                onStopMeeting={handleStopMeeting}
-              />
-            )}
+                {currentTab === 'live' && (
+                  <LiveMeetingPage
+                    meeting={liveMeeting}
+                    onStopMeeting={handleStopMeeting}
+                    onSelectAnotherMeeting={() => setCurrentTab('overview')}
+                  />
+                )}
 
-            {currentTab === 'details' && selectedMeeting && (
-              <MeetingDetailsPage
-                meeting={selectedMeeting}
-                transcript={mockTranscript}
-                onBack={() => setCurrentTab('overview')}
-                onDelete={handleDeleteMeeting}
-              />
-            )}
+                {currentTab === 'details' && selectedMeeting && (
+                  <MeetingDetailsPage
+                    meeting={selectedMeeting}
+                    onBack={() => setCurrentTab('overview')}
+                    onDelete={handleDeleteMeeting}
+                  />
+                )}
 
-            {currentTab === 'history' && (
-              <HistoryPage
-                meetings={filteredMeetings}
-                onSelectMeeting={handleSelectMeeting}
-              />
-            )}
+                {currentTab === 'history' && (
+                  <HistoryPage
+                    meetings={filteredMeetings}
+                    onSelectMeeting={handleSelectMeeting}
+                  />
+                )}
 
-            {currentTab === 'settings' && <SettingsPage />}
+                {currentTab === 'settings' && <SettingsPage />}
+              </>
+            )}
           </div>
         </main>
       </div>
