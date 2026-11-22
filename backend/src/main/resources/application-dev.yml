@@ -1,16 +1,17 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:vinxadb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE
-    driverClassName: org.h2.Driver
-    username: sa
-    password: ""
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://ep-still-leaf-bevsok4d-pooler.c-9.us-east-2.aws.neon.tech/neondb?sslmode=require}
+    username: ${SPRING_DATASOURCE_USERNAME:neondb_owner}
+    password: ${SPRING_DATASOURCE_PASSWORD:npg_TmqHZps7oQb3}
+    driverClassName: org.postgresql.Driver
   jpa:
-    database-platform: org.hibernate.dialect.H2Dialect
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: update
     show-sql: false
   flyway:
-    enabled: false # Disabled in mem-dev, enabled in PostgreSQL prod
+    enabled: true
+    baseline-on-migrate: true
 
 vinxa:
   jwt:
