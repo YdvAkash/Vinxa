@@ -1,0 +1,14 @@
+package com.vinxa.live.common;
+
+import java.time.OffsetDateTime;
+
+public record ErrorResponse(
+        int status,
+        String error,
+        String message,
+        OffsetDateTime timestamp
+) {
+    public ErrorResponse(int status, String error, String message) {
+        this(status, error, message, OffsetDateTime.now());
+    }
+}

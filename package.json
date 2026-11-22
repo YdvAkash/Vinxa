@@ -1,0 +1,14 @@
+{
+  "name": "vinxa-live",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vinxa Live Monorepo",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build:dashboard": "npm run build --workspace=apps/dashboard",
+    "build:extension": "npm run build --workspace=apps/extension",
+    "dev:dashboard": "npm run dev --workspace=apps/dashboard"
+  }
+}
