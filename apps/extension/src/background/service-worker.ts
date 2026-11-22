@@ -1,5 +1,27 @@
-import { detectPlatformFromUrl } from '../adapters/detector';
 import { ExtensionRecordingState, MeetingPlatform } from '../adapters/types';
+
+function detectPlatformFromUrl(urlString: string): MeetingPlatform {
+  try {
+    const parsed = new URL(urlString);
+    const hostname = parsed.hostname.toLowerCase();
+
+    if (hostname === 'meet.google.com') {
+      return 'GOOGLE_MEET';
+    }
+
+    if (hostname === 'teams.microsoft.com' || hostname.endsWith('.teams.microsoft.com') || hostname === 'teams.live.com') {
+      return 'MICROSOFT_TEAMS';
+    }
+
+    if (hostname === 'zoom.us' || hostname.endsWith('.zoom.us')) {
+      return 'ZOOM';
+    }
+
+    return 'UNKNOWN';
+  } catch {
+    return 'UNKNOWN';
+  }
+}
 
 let currentState: ExtensionRecordingState = 'IDLE';
 let activeMeetingPlatform: MeetingPlatform = 'UNKNOWN';

@@ -9,17 +9,18 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: 'dist',
+    emptyOutDir: true,
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'popup.html'),
         'service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
         'detector-content': resolve(__dirname, 'src/content/detector-content.ts'),
-        'offscreen': resolve(__dirname, 'offscreen.html')
+        offscreen: resolve(__dirname, 'offscreen.html')
       },
       output: {
         entryFileNames: (chunk) => {
-          if (chunk.name === 'service-worker') return 'src/background/service-worker.js';
-          if (chunk.name === 'detector-content') return 'src/content/detector-content.js';
+          if (chunk.name === 'service-worker') return 'service-worker.js';
+          if (chunk.name === 'detector-content') return 'detector-content.js';
           return 'assets/[name]-[hash].js';
         }
       }

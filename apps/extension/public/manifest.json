@@ -25,7 +25,7 @@
     "default_title": "Vinxa Live"
   },
   "background": {
-    "service_worker": "src/background/service-worker.ts",
+    "service_worker": "service-worker.js",
     "type": "module"
   },
   "content_scripts": [
@@ -38,7 +38,7 @@
         "https://zoom.us/*",
         "https://*.zoom.us/*"
       ],
-      "js": ["src/content/detector-content.ts"],
+      "js": ["detector-content.js"],
       "run_at": "document_end"
     }
   ]
