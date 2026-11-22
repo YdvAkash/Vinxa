@@ -33,6 +33,9 @@ class MeetingServiceTest {
     @Mock
     private JwtTokenProvider jwtTokenProvider;
 
+    @Mock
+    private com.vinxa.live.ai.AiSummaryService aiSummaryService;
+
     private MeetingService meetingService;
 
     private User user1;
@@ -40,7 +43,7 @@ class MeetingServiceTest {
 
     @BeforeEach
     void setUp() {
-        meetingService = new MeetingService(meetingRepository, consentEventRepository, jwtTokenProvider);
+        meetingService = new MeetingService(meetingRepository, consentEventRepository, jwtTokenProvider, aiSummaryService);
         user1 = new User(UUID.randomUUID(), "alice@example.com", "hash1", OffsetDateTime.now());
         user2 = new User(UUID.randomUUID(), "bob@example.com", "hash2", OffsetDateTime.now());
     }

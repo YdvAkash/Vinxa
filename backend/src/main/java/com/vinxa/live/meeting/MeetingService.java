@@ -21,15 +21,18 @@ public class MeetingService {
     private final MeetingRepository meetingRepository;
     private final ConsentEventRepository consentEventRepository;
     private final JwtTokenProvider jwtTokenProvider;
+    private final com.vinxa.live.ai.AiSummaryService aiSummaryService;
 
     public MeetingService(
             MeetingRepository meetingRepository,
             ConsentEventRepository consentEventRepository,
-            JwtTokenProvider jwtTokenProvider
+            JwtTokenProvider jwtTokenProvider,
+            com.vinxa.live.ai.AiSummaryService aiSummaryService
     ) {
         this.meetingRepository = meetingRepository;
         this.consentEventRepository = consentEventRepository;
         this.jwtTokenProvider = jwtTokenProvider;
+        this.aiSummaryService = aiSummaryService;
     }
 
     public MeetingResponse createMeeting(User user, CreateMeetingRequest request) {
@@ -100,6 +103,9 @@ public class MeetingService {
             meeting.updateStatus(MeetingStatus.FINALIZING);
             meeting.updateStatus(MeetingStatus.COMPLETED);
             meeting = meetingRepository.save(meeting);
+
+            // Trigger AI intelligence analysis
+            aiSummaryService.generateMeetingAnalysisAsync(meeting.getId());
         }
         return MeetingResponse.fromEntity(meeting);
     }
