@@ -16,9 +16,25 @@ public record MeetingResponse(
         MeetingStatus status,
         OffsetDateTime startedAt,
         OffsetDateTime endedAt,
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
+        int participantCount,
+        int segmentCount,
+        int actionItemCount,
+        int decisionCount,
+        String shareToken,
+        boolean publicShared
 ) {
     public static MeetingResponse fromEntity(Meeting m) {
+        return fromEntityWithCounts(m, 0, 0, 0, 0);
+    }
+
+    public static MeetingResponse fromEntityWithCounts(
+            Meeting m,
+            int participantCount,
+            int segmentCount,
+            int actionItemCount,
+            int decisionCount
+    ) {
         return new MeetingResponse(
                 m.getId(),
                 m.getUser().getId(),
@@ -28,7 +44,13 @@ public record MeetingResponse(
                 m.getStatus(),
                 m.getStartedAt(),
                 m.getEndedAt(),
-                m.getCreatedAt()
+                m.getCreatedAt(),
+                participantCount,
+                segmentCount,
+                actionItemCount,
+                decisionCount,
+                m.getShareToken(),
+                Boolean.TRUE.equals(m.getPublicShared())
         );
     }
 }

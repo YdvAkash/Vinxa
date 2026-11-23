@@ -1,5 +1,6 @@
 import React from 'react';
 import { MeetingStatus } from '../../types';
+import { Check } from 'lucide-react';
 
 interface StatusBadgeProps {
   status: MeetingStatus;
@@ -10,41 +11,47 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
     switch (status) {
       case 'RECORDING':
         return {
-          bg: 'bg-red-500/10 text-red-400 border-red-500/20',
+          bg: 'bg-red-50 text-red-600 border-red-200',
           dot: 'bg-red-500 animate-pulse',
-          label: 'Recording'
+          label: 'Live Recording',
+          showCheck: false
         };
       case 'ANALYSIS_COMPLETED':
         return {
-          bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+          bg: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
           dot: 'bg-emerald-500',
-          label: 'Analyzed'
+          label: 'Analyzed',
+          showCheck: true
         };
       case 'ANALYSIS_PENDING':
       case 'FINALIZING':
       case 'STOPPING':
         return {
-          bg: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+          bg: 'bg-amber-50 text-amber-700 border-amber-200',
           dot: 'bg-amber-500 animate-spin',
-          label: 'Processing'
+          label: 'Processing',
+          showCheck: false
         };
       case 'COMPLETED':
         return {
-          bg: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-          dot: 'bg-blue-500',
-          label: 'Completed'
+          bg: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
+          dot: 'bg-emerald-500',
+          label: 'Analyzed',
+          showCheck: true
         };
       case 'CONSENT_REQUIRED':
         return {
-          bg: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-          dot: 'bg-purple-500',
-          label: 'Consent Needed'
+          bg: 'bg-violet-50 text-violet-700 border-violet-200',
+          dot: 'bg-violet-500',
+          label: 'Consent Needed',
+          showCheck: false
         };
       default:
         return {
-          bg: 'bg-slate-500/10 text-slate-400 border-slate-500/20',
-          dot: 'bg-slate-500',
-          label: status
+          bg: 'bg-slate-100 text-slate-600 border-slate-200',
+          dot: 'bg-slate-400',
+          label: status,
+          showCheck: false
         };
     }
   };
@@ -52,8 +59,14 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
   const config = getBadgeConfig();
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${config.bg}`}>
-      <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${config.dot}`} />
+    <span
+      className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-semibold border ${config.bg}`}
+    >
+      {config.showCheck ? (
+        <Check className="w-3 h-3 mr-1 text-emerald-600 stroke-[2.5]" />
+      ) : (
+        <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${config.dot}`} />
+      )}
       {config.label}
     </span>
   );

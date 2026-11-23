@@ -21,6 +21,15 @@ public class User {
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 
+    @Column(name = "webhook_url")
+    private String webhookUrl;
+
+    @Column(name = "webhook_secret")
+    private String webhookSecret;
+
+    @Column(name = "webhook_auto_push")
+    private Boolean webhookAutoPush = false;
+
     public User() {
     }
 
@@ -71,5 +80,29 @@ public class User {
 
     public void setCreatedAt(OffsetDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getWebhookUrl() {
+        return webhookUrl;
+    }
+
+    public void setWebhookUrl(String webhookUrl) {
+        this.webhookUrl = webhookUrl;
+    }
+
+    public String getWebhookSecret() {
+        return webhookSecret;
+    }
+
+    public void setWebhookSecret(String webhookSecret) {
+        this.webhookSecret = webhookSecret;
+    }
+
+    public Boolean getWebhookAutoPush() {
+        return webhookAutoPush != null ? webhookAutoPush : false;
+    }
+
+    public void setWebhookAutoPush(Boolean webhookAutoPush) {
+        this.webhookAutoPush = webhookAutoPush;
     }
 }

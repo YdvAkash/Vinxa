@@ -23,8 +23,8 @@ public class WebSocketConfig implements WebSocketConfigurer {
         registry.addHandler(audioWebSocketHandler, "/ws/audio")
                 .setAllowedOrigins("*");
 
-        // Real-time Event broadcast WebSocket for React Dashboard
-        registry.addHandler(eventWebSocketHandler, "/ws/meetings/{meetingId}/events")
+        // Real-time Event broadcast WebSocket for React Dashboard (wildcard + query param support)
+        registry.addHandler(eventWebSocketHandler, "/ws/meetings/*/events", "/ws/meetings/{meetingId}/events", "/ws/events")
                 .setAllowedOrigins("*");
     }
 }

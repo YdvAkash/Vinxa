@@ -13,6 +13,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'popup.html'),
+        permission: resolve(__dirname, 'permission.html'),
         'service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
         'detector-content': resolve(__dirname, 'src/content/detector-content.ts'),
         offscreen: resolve(__dirname, 'offscreen.html')

@@ -27,7 +27,7 @@ public enum MeetingStatus {
             Map.entry(FINALIZING, EnumSet.of(COMPLETED, ANALYSIS_PENDING, ERROR, DELETION_PENDING)),
             Map.entry(COMPLETED, EnumSet.of(ANALYSIS_PENDING, DELETION_PENDING)),
             Map.entry(ANALYSIS_PENDING, EnumSet.of(ANALYSIS_COMPLETED, ERROR, DELETION_PENDING)),
-            Map.entry(ANALYSIS_COMPLETED, EnumSet.of(DELETION_PENDING)),
+            Map.entry(ANALYSIS_COMPLETED, EnumSet.of(ANALYSIS_PENDING, DELETION_PENDING)),
             Map.entry(ERROR, EnumSet.of(READY, RECORDING, ANALYSIS_PENDING, DELETION_PENDING)),
             Map.entry(DELETION_PENDING, EnumSet.of(DELETED)),
             Map.entry(DELETED, EnumSet.noneOf(MeetingStatus.class))

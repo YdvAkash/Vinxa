@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vinxa Live — Microphone & Audio Setup</title>
+    <style>
+      :root {
+        --bg-base: #090d16;
+        --bg-surface: #111827;
+        --bg-elevated: #172033;
+        --border-subtle: rgba(148, 163, 184, 0.14);
+        --border-strong: rgba(148, 163, 184, 0.24);
+        --text-primary: #f8fafc;
+        --text-secondary: #94a3b8;
+        --text-muted: #64748b;
+        --accent: #10b981;
+        --accent-hover: #34d399;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
+        background-color: var(--bg-base);
+        background-image: radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.08), transparent 60%);
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 24px;
+      }
+      .card {
+        background-color: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 16px;
+        padding: 36px 32px;
+        max-width: 500px;
+        width: 100%;
+        box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+        text-align: center;
+      }
+      .brand-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 12px;
+        border-radius: 999px;
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.25);
+        color: #6ee7b7;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        margin-bottom: 20px;
+      }
+      .icon-box {
+        width: 58px;
+        height: 58px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(5, 150, 105, 0.08));
+        border: 1px solid rgba(16, 185, 129, 0.35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 18px;
+        font-size: 26px;
+        box-shadow: 0 12px 28px -6px rgba(16, 185, 129, 0.25);
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 10px;
+        color: var(--text-primary);
+      }
+      p {
+        font-size: 13.5px;
+        color: var(--text-secondary);
+        line-height: 1.6;
+        margin-bottom: 24px;
+      }
+      .meter-box {
+        background-color: var(--bg-base);
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 20px;
+        display: none;
+        text-align: left;
+      }
+      .meter-label {
+        font-size: 11.5px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .meter-track {
+        height: 8px;
+        background-color: var(--bg-elevated);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .meter-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #10b981, #34d399);
+        border-radius: 999px;
+        transition: width 0.08s ease-out;
+      }
+      .btn {
+        background-color: var(--accent);
+        color: #022c22;
+        border: none;
+        padding: 13px 24px;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        width: 100%;
+        box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25);
+      }
+      .btn:hover:not(:disabled) {
+        background-color: var(--accent-hover);
+        transform: translateY(-1px);
+      }
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background-color: var(--bg-elevated);
+        color: var(--text-primary);
+        border: 1px solid var(--border-strong);
+        box-shadow: none;
+        margin-top: 12px;
+        display: none;
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background-color: #1e293b;
+      }
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-size: 12.5px;
+        font-weight: 600;
+        margin-top: 14px;
+      }
+      .status-granted {
+        background-color: rgba(16, 185, 129, 0.14);
+        color: #6ee7b7;
+        border: 1px solid rgba(16, 185, 129, 0.35);
+      }
+      .status-error {
+        background-color: rgba(239, 68, 68, 0.14);
+        color: #fca5a5;
+        border: 1px solid rgba(239, 68, 68, 0.35);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="brand-row">Vinxa Live Audio Engine</div>
+      <div class="icon-box" id="icon">🎙️</div>
+      <h1>Enable Microphone Capture</h1>
+      <p>
+        To capture your own voice alongside remote meeting participants for real-time dual-channel transcription, Vinxa Live requires microphone access.
+      </p>
+
+      <div class="meter-box" id="meterBox">
+        <div class="meter-label">
+          <span>LIVE MICROPHONE INPUT LEVEL</span>
+          <span id="meterText" style="color: #6ee7b7; font-family: monospace;">Active</span>
+        </div>
+        <div class="meter-track">
+          <div class="meter-fill" id="meterFill"></div>
+        </div>
+      </div>
+
+      <button class="btn" id="requestBtn">Allow Microphone Access</button>
+      <div id="statusContainer"></div>
+      <button class="btn btn-secondary" id="closeTabBtn">Close Setup Tab &amp; Return to Meeting</button>
+    </div>
+
+    <script type="module" src="/src/permission/permission.ts"></script>
+  </body>
+</html>

@@ -26,19 +26,34 @@ public class TranscriptController {
     private final MeetingSummaryRepository meetingSummaryRepository;
     private final ActionItemRepository actionItemRepository;
     private final ParticipantRepository participantRepository;
+    private final com.vinxa.live.stt.SpeechToTextProvider sttProvider;
 
     public TranscriptController(
             MeetingService meetingService,
             TranscriptSegmentRepository transcriptSegmentRepository,
             MeetingSummaryRepository meetingSummaryRepository,
             ActionItemRepository actionItemRepository,
-            ParticipantRepository participantRepository
+            ParticipantRepository participantRepository,
+            com.vinxa.live.stt.SpeechToTextProvider sttProvider
     ) {
         this.meetingService = meetingService;
         this.transcriptSegmentRepository = transcriptSegmentRepository;
         this.meetingSummaryRepository = meetingSummaryRepository;
         this.actionItemRepository = actionItemRepository;
         this.participantRepository = participantRepository;
+        this.sttProvider = sttProvider;
+    }
+
+    @PostMapping("/language")
+    public ResponseEntity<Map<String, String>> changeMeetingLanguage(
+            @PathVariable("id") UUID meetingId,
+            @RequestBody Map<String, String> body
+    ) {
+        User user = SecurityUtils.getCurrentUser();
+        meetingService.getMeetingAndVerifyOwnership(user, meetingId);
+        String language = body.getOrDefault("language", "multi");
+        sttProvider.switchLanguage(meetingId, language);
+        return ResponseEntity.ok(Map.of("meetingId", meetingId.toString(), "language", language));
     }
 
     @GetMapping("/transcript")
@@ -131,11 +146,12 @@ public class TranscriptController {
                         i.getId(),
                         i.getMeeting().getId(),
                         i.getTitle(),
+                        i.getTitle(),
                         i.getAssignee(),
                         i.getDeadline() != null ? i.getDeadline().toString() : null,
-                        i.getPriority(),
+                        i.getPriority() != null ? i.getPriority().toUpperCase() : "MEDIUM",
                         i.getStatus(),
-                        i.getEvidenceSegmentIds(),
+                        parseEvidenceList(i.getEvidenceSegmentIds()),
                         i.getCreatedAt() != null ? i.getCreatedAt().toString() : null
                 ))
                 .toList();
@@ -143,15 +159,65 @@ public class TranscriptController {
         return ResponseEntity.ok(dtos);
     }
 
+    @PatchMapping("/actions/{actionId}")
+    public ResponseEntity<ActionItemDto> toggleActionItem(
+            @PathVariable("id") UUID meetingId,
+            @PathVariable("actionId") UUID actionId,
+            @RequestBody(required = false) Map<String, String> body
+    ) {
+        User user = SecurityUtils.getCurrentUser();
+        meetingService.getMeetingAndVerifyOwnership(user, meetingId);
+
+        ActionItem item = actionItemRepository.findById(actionId)
+                .orElseThrow(() -> new IllegalArgumentException("Action item not found: " + actionId));
+
+        if (!item.getMeeting().getId().equals(meetingId)) {
+            throw new IllegalArgumentException("Action item does not belong to meeting: " + meetingId);
+        }
+
+        String newStatus = body != null && body.containsKey("status")
+                ? body.get("status")
+                : ("DONE".equalsIgnoreCase(item.getStatus()) ? "OPEN" : "DONE");
+
+        item.setStatus(newStatus);
+        item = actionItemRepository.save(item);
+
+        return ResponseEntity.ok(new ActionItemDto(
+                item.getId(),
+                item.getMeeting().getId(),
+                item.getTitle(),
+                item.getTitle(),
+                item.getAssignee(),
+                item.getDeadline() != null ? item.getDeadline().toString() : null,
+                item.getPriority() != null ? item.getPriority().toUpperCase() : "MEDIUM",
+                item.getStatus(),
+                parseEvidenceList(item.getEvidenceSegmentIds()),
+                item.getCreatedAt() != null ? item.getCreatedAt().toString() : null
+        ));
+    }
+
+    private static List<String> parseEvidenceList(String raw) {
+        if (raw == null || raw.isBlank()) return List.of();
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1);
+        }
+        return java.util.Arrays.stream(trimmed.split(","))
+                .map(s -> s.replace("\"", "").replace("'", "").trim())
+                .filter(s -> !s.isEmpty())
+                .toList();
+    }
+
     public record ActionItemDto(
             UUID id,
             UUID meetingId,
+            String task,
             String title,
             String assignee,
             String deadline,
             String priority,
             String status,
-            String evidenceSegmentIds,
+            List<String> evidenceSegmentIds,
             String createdAt
     ) {}
 
@@ -176,6 +242,28 @@ public class TranscriptController {
             participant.setDisplayName(displayName);
             participant = participantRepository.save(participant);
         }
+
+        return ResponseEntity.ok(participant);
+    }
+
+    @PatchMapping("/speakers/{speakerKey}")
+    public ResponseEntity<Participant> renameSpeakerByKey(
+            @PathVariable("id") UUID meetingId,
+            @PathVariable("speakerKey") String speakerKey,
+            @RequestBody Map<String, String> body
+    ) {
+        User user = SecurityUtils.getCurrentUser();
+        Meeting meeting = meetingService.getMeetingAndVerifyOwnership(user, meetingId);
+
+        String displayName = body.get("displayName");
+        if (displayName == null || displayName.isBlank()) {
+            throw new IllegalArgumentException("Display name cannot be blank");
+        }
+
+        Participant participant = participantRepository.findByMeetingIdAndSpeakerKey(meetingId, speakerKey)
+                .orElseGet(() -> new Participant(UUID.randomUUID(), meeting, speakerKey, displayName.trim()));
+        participant.setDisplayName(displayName.trim());
+        participant = participantRepository.save(participant);
 
         return ResponseEntity.ok(participant);
     }

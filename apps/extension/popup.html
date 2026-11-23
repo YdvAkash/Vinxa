@@ -3,14 +3,374 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vinxa Live</title>
+    <title>Vinxa — Live Intelligence</title>
     <style>
-      body {
+      :root {
+        --bg-base: #f7f6fc;
+        --bg-surface: #ffffff;
+        --bg-elevated: #f3effe;
+        --border-subtle: #e5e0f5;
+        --border-focus: #8b5cf6;
+        --text-primary: #1e1b4b;
+        --text-secondary: #64748b;
+        --text-muted: #94a3b8;
+        --accent: #7c3aed;
+        --accent-hover: #6d28d9;
+        --danger: #ef4444;
+        --warning: #f59e0b;
+      }
+
+      * {
+        box-sizing: border-box;
         margin: 0;
-        width: 340px;
-        background-color: #0f172a;
-        color: #f8fafc;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 0;
+      }
+
+      body {
+        width: 375px;
+        background-color: var(--bg-base);
+        color: var(--text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+
+      .vx-shell {
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 11px;
+      }
+
+      /* Top Header */
+      .vx-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 11px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .vx-brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .vx-logo {
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #ffffff;
+        font-weight: 800;
+        font-size: 15px;
+        box-shadow: 0 4px 12px rgba(124, 58, 237, 0.28);
+      }
+
+      .vx-title-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .vx-title {
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: var(--text-primary);
+      }
+
+      .vx-subtitle {
+        font-size: 10px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #ede9fe;
+        color: #6d28d9;
+      }
+
+      .vx-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3.5px 9px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .vx-pill-auth {
+        background: #ecfdf5;
+        color: #047857;
+        border: 1px solid #a7f3d0;
+      }
+
+      .vx-pill-warn {
+        background: #fffbeb;
+        color: #b45309;
+        border: 1px solid #fde68a;
+      }
+
+      .vx-pill-live {
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fecaca;
+      }
+
+      .vx-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .vx-dot-pulse {
+        animation: vxPulse 1.2s infinite;
+      }
+
+      @keyframes vxPulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.35; transform: scale(1.2); }
+      }
+
+      /* Surface Cards */
+      .vx-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 16px;
+        padding: 12px 13px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        box-shadow: 0 2px 10px rgba(109, 40, 217, 0.04);
+      }
+
+      .vx-card-live {
+        background: linear-gradient(135deg, #fff5f5 0%, #ffffff 100%);
+        border: 1px solid #fecaca;
+      }
+
+      .vx-card-paused {
+        background: linear-gradient(135deg, #fffbeb 0%, #ffffff 100%);
+        border: 1px solid #fde68a;
+      }
+
+      .vx-row-between {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .vx-label {
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #7c3aed;
+      }
+
+      /* Account Bar */
+      .vx-account-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: #ffffff;
+        border: 1px solid var(--border-subtle);
+        border-radius: 12px;
+        padding: 7px 11px;
+        box-shadow: 0 1px 4px rgba(109, 40, 217, 0.03);
+      }
+
+      .vx-user-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .vx-avatar {
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        background: #ede9fe;
+        border: 1px solid #ddd6fe;
+        color: #6d28d9;
+        font-size: 10px;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .vx-email {
+        font-size: 11.5px;
+        font-weight: 700;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Form Controls */
+      .vx-select, .vx-input {
+        width: 100%;
+        background: #f7f6fc;
+        color: var(--text-primary);
+        border: 1px solid #ddd6fe;
+        border-radius: 10px;
+        padding: 7.5px 10px;
+        font-size: 11.5px;
+        font-weight: 600;
+        outline: none;
+        transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+      }
+
+      .vx-select:focus, .vx-input:focus {
+        background: #ffffff;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.14);
+      }
+
+      /* Buttons */
+      .vx-btn {
+        border: none;
+        border-radius: 11px;
+        padding: 10px 14px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        width: 100%;
+      }
+
+      .vx-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .vx-btn-primary {
+        background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+        color: #ffffff;
+        box-shadow: 0 4px 14px rgba(124, 58, 237, 0.26);
+      }
+
+      .vx-btn-primary:hover:not(:disabled) {
+        background: linear-gradient(135deg, #6d28d9 0%, #5b21b6 100%);
+        transform: translateY(-0.5px);
+      }
+
+      .vx-btn-secondary {
+        background: #f4f3f9;
+        color: #334155;
+        border: 1px solid #e2ddf5;
+      }
+
+      .vx-btn-secondary:hover:not(:disabled) {
+        background: #ede9fe;
+        color: #5b21b6;
+      }
+
+      .vx-btn-danger {
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fecaca;
+      }
+
+      .vx-btn-danger:hover:not(:disabled) {
+        background: #fee2e2;
+        color: #b91c1c;
+      }
+
+      .vx-btn-warn {
+        background: #fffbeb;
+        color: #b45309;
+        border: 1px solid #fde68a;
+      }
+
+      .vx-btn-warn:hover:not(:disabled) {
+        background: #fef3c7;
+      }
+
+      .vx-btn-ghost {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 700;
+        cursor: pointer;
+        padding: 4px 7px;
+        border-radius: 7px;
+      }
+
+      .vx-btn-ghost:hover {
+        color: #6d28d9;
+        background: #ede9fe;
+      }
+
+      .vx-grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .vx-grid-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+      }
+
+      .vx-consent-box {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 10px 11px;
+        border-radius: 12px;
+        background: #f5f3ff;
+        border: 1px solid #ddd6fe;
+        font-size: 11px;
+        color: #475569;
+        font-weight: 500;
+        line-height: 1.45;
+        cursor: pointer;
+      }
+
+      .vx-consent-box input {
+        margin-top: 2px;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+
+      .vx-meter-track {
+        flex: 1;
+        height: 6px;
+        background: #e2e8f0;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+
+      .vx-meter-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #8b5cf6, #6d28d9);
+        transition: width 0.1s ease-out;
+      }
+
+      .vx-footer {
+        padding-top: 10px;
+        border-top: 1px solid var(--border-subtle);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
       }
     </style>
   </head>

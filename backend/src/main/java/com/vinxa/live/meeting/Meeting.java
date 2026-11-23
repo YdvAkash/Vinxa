@@ -43,6 +43,12 @@ public class Meeting {
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
 
+    @Column(name = "share_token", unique = true)
+    private String shareToken;
+
+    @Column(name = "public_shared")
+    private Boolean publicShared = false;
+
     public Meeting() {
     }
 
@@ -157,5 +163,21 @@ public class Meeting {
 
     public void setDeletedAt(OffsetDateTime deletedAt) {
         this.deletedAt = deletedAt;
+    }
+
+    public String getShareToken() {
+        return shareToken;
+    }
+
+    public void setShareToken(String shareToken) {
+        this.shareToken = shareToken;
+    }
+
+    public Boolean getPublicShared() {
+        return publicShared != null ? publicShared : false;
+    }
+
+    public void setPublicShared(Boolean publicShared) {
+        this.publicShared = publicShared;
     }
 }

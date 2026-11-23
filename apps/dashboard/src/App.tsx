@@ -6,22 +6,88 @@ import { LiveMeetingPage } from './pages/LiveMeetingPage';
 import { MeetingDetailsPage } from './pages/MeetingDetailsPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AskAiPage } from './pages/AskAiPage';
+import { AuthPage } from './pages/AuthPage';
+import { PublicSharedMeetingPage } from './pages/PublicSharedMeetingPage';
 import { api } from './services/api';
-import { Meeting } from './types';
+import { Meeting, AuthUser, ActionItem, WebhookDispatchResult } from './types';
+import { CheckSquare, Square, ArrowUpRight, Send, Check } from 'lucide-react';
 
 export const App: React.FC = () => {
-  const [currentTab, setCurrentTab] = useState<NavTab>('overview');
+  const [publicShareToken] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('share')) return params.get('share');
+    const pathMatch = window.location.pathname.match(/\/share\/([a-zA-Z0-9_-]+)/);
+    return pathMatch ? pathMatch[1] : null;
+  });
+
+  if (publicShareToken) {
+    return <PublicSharedMeetingPage shareToken={publicShareToken} />;
+  }
+
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => api.getStoredUser());
+  const [currentTab, setCurrentTab] = useState<NavTab>(() => {
+    const path = window.location.pathname.toLowerCase();
+    const params = new URLSearchParams(window.location.search);
+    if (path.includes('/live') || params.has('id')) {
+      return 'live';
+    }
+    return 'overview';
+  });
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
+  const [copilotInitialPrompt, setCopilotInitialPrompt] = useState<string | null>(null);
+  const [liveSelectedMeetingId, setLiveSelectedMeetingId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('id');
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const [globalActionItems, setGlobalActionItems] = useState<
+    { meeting: Meeting; item: ActionItem }[]
+  >([]);
+  const [loadingGlobalActions, setLoadingGlobalActions] = useState(false);
+  const [pushingGlobalId, setPushingGlobalId] = useState<string | null>(null);
+  const [pushedGlobalMap, setPushedGlobalMap] = useState<Record<string, WebhookDispatchResult>>({});
+
+  useEffect(() => {
+    api.verifySession().then((verifiedUser) => {
+      if (verifiedUser) {
+        setCurrentUser(verifiedUser);
+      } else if (!localStorage.getItem('vinxa_token')) {
+        setCurrentUser(null);
+      }
+    });
+
+    const handleExpired = () => {
+      setCurrentUser(null);
+      setMeetings([]);
+      setSelectedMeeting(null);
+    };
+    window.addEventListener('vinxa-session-expired', handleExpired);
+    return () => window.removeEventListener('vinxa-session-expired', handleExpired);
+  }, []);
 
   const fetchMeetings = async () => {
+    if (!api.getStoredUser() && !localStorage.getItem('vinxa_token')) {
+      setLoading(false);
+      return;
+    }
     try {
       const data = await api.getMeetings();
       setMeetings(data);
-      if (data.length > 0 && !selectedMeeting) {
-        setSelectedMeeting(data[0]);
+      if (data.length > 0) {
+        setSelectedMeeting((prev) => {
+          if (!prev) return data[0];
+          return data.find((m) => m.id === prev.id) || data[0];
+        });
+      }
+      const activeRec = data.find((m) => m.status === 'RECORDING');
+      if (activeRec) {
+        setLiveSelectedMeetingId(activeRec.id);
       }
     } catch (err) {
       console.warn('Backend meetings check:', err);
@@ -31,23 +97,89 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
     fetchMeetings();
-    const interval = setInterval(fetchMeetings, 10000);
+    const interval = setInterval(fetchMeetings, 2500);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentUser]);
 
-  const liveMeeting = meetings.find((m) => m.status === 'RECORDING') || (meetings.length > 0 ? meetings[0] : null);
+  useEffect(() => {
+    if (currentTab !== 'action-items' || meetings.length === 0) return;
+    let cancelled = false;
+    async function loadAllActions() {
+      setLoadingGlobalActions(true);
+      try {
+        const list: { meeting: Meeting; item: ActionItem }[] = [];
+        await Promise.all(
+          meetings.slice(0, 15).map(async (m) => {
+            try {
+              const items = await api.getActionItems(m.id);
+              items.forEach((it) => list.push({ meeting: m, item: it }));
+            } catch {}
+          })
+        );
+        if (!cancelled) setGlobalActionItems(list);
+      } finally {
+        if (!cancelled) setLoadingGlobalActions(false);
+      }
+    }
+    loadAllActions();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTab, meetings.length]);
 
-  const handleSelectMeeting = (meeting: Meeting) => {
+  const handleLogout = () => {
+    api.logout();
+    setCurrentUser(null);
+    setMeetings([]);
+    setSelectedMeeting(null);
+  };
+
+  if (!currentUser) {
+    return (
+      <AuthPage
+        onAuthSuccess={(user) => {
+          setCurrentUser(user);
+          setLoading(true);
+        }}
+      />
+    );
+  }
+
+  const liveMeeting =
+    meetings.find((m) => m.status === 'RECORDING') ||
+    (liveSelectedMeetingId ? meetings.find((m) => m.id === liveSelectedMeetingId) || null : null) ||
+    (meetings.length > 0 ? meetings[0] : null);
+
+  const handleSelectMeeting = (meeting: Meeting, segmentId?: string | null) => {
     setSelectedMeeting(meeting);
+    setHighlightedSegmentId(segmentId || null);
     setCurrentTab('details');
+  };
+
+  const handleSelectSearchResult = (meetingId: string, segmentId?: string) => {
+    const found = meetings.find((m) => m.id === meetingId);
+    if (found) {
+      handleSelectMeeting(found, segmentId || null);
+    }
   };
 
   const handleCreateMeeting = async (title: string, platform: string, url: string) => {
     const newMeeting = await api.createMeeting(title, platform, url);
     await fetchMeetings();
     setSelectedMeeting(newMeeting);
+    setLiveSelectedMeetingId(newMeeting.id);
     setCurrentTab('live');
+  };
+
+  const handleRenameMeeting = async (meetingId: string, newTitle: string) => {
+    const updated = await api.renameMeeting(meetingId, newTitle);
+    setSelectedMeeting(updated);
+    await fetchMeetings();
   };
 
   const handleStopMeeting = async () => {
@@ -55,6 +187,7 @@ export const App: React.FC = () => {
     try {
       await api.stopMeeting(liveMeeting.id);
       await fetchMeetings();
+      setSelectedMeeting(liveMeeting);
       setCurrentTab('details');
     } catch (err) {
       console.error('Stop meeting error:', err);
@@ -74,63 +207,281 @@ export const App: React.FC = () => {
     }
   };
 
-  const filteredMeetings = meetings.filter((m) =>
-    m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    m.platform.toLowerCase().includes(searchQuery.toLowerCase())
+  const handleToggleGlobalAction = async (meetingId: string, actionId: string) => {
+    try {
+      const updated = await api.toggleActionItem(meetingId, actionId);
+      setGlobalActionItems((prev) =>
+        prev.map((entry) =>
+          entry.item.id === actionId
+            ? { ...entry, item: { ...entry.item, status: updated.status } }
+            : entry
+        )
+      );
+    } catch {}
+  };
+
+  const handlePushGlobalActionWebhook = async (meetingId: string, actionId: string) => {
+    setPushingGlobalId(actionId);
+    try {
+      const res = await api.pushActionItemToWebhook(meetingId, actionId);
+      setPushedGlobalMap((prev) => ({ ...prev, [actionId]: res }));
+    } catch (err) {
+      console.error('Webhook dispatch failed:', err);
+    } finally {
+      setPushingGlobalId(null);
+    }
+  };
+
+  const filteredMeetings = meetings.filter(
+    (m) =>
+      m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      m.platform.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
-      <Navbar onSearch={(q) => setSearchQuery(q)} />
+    <div className="min-h-screen flex bg-[#f7f6fc] text-slate-900">
+      <Sidebar
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        isRecording={meetings.some((m) => m.status === 'RECORDING')}
+        mobileOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
+        meetingCount={meetings.length}
+      />
 
-      <div className="flex-1 flex overflow-hidden">
-        <Sidebar
-          currentTab={currentTab}
-          onSelectTab={setCurrentTab}
-          isRecording={meetings.some((m) => m.status === 'RECORDING')}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <Navbar
+          onSearch={(q) => setSearchQuery(q)}
+          user={currentUser}
+          onLogout={handleLogout}
+          meetings={meetings}
+          onSelectMeetingResult={handleSelectSearchResult}
+          mobileMenuOpen={mobileMenuOpen}
+          onToggleMobileMenu={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
 
-        <main className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-6xl mx-auto">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-7">
+          <div className="max-w-7xl mx-auto">
             {loading && meetings.length === 0 ? (
-              <div className="py-24 text-center text-slate-400 text-sm animate-pulse">
-                Connecting to Vinxa Live Cloud Service...
+              <div className="py-24 text-center text-slate-500 text-sm font-semibold animate-pulse">
+                Connecting to Vinxa Live Intelligence Cloud...
               </div>
             ) : (
               <>
                 {currentTab === 'overview' && (
                   <Overview
                     meetings={filteredMeetings}
-                    onSelectMeeting={handleSelectMeeting}
+                    onSelectMeeting={(m) => handleSelectMeeting(m)}
                     onGoToLive={() => setCurrentTab('live')}
+                    onGoToCopilot={(initialQ) => {
+                      if (initialQ) setCopilotInitialPrompt(initialQ);
+                      setCurrentTab('copilot');
+                    }}
                     onCreateMeeting={handleCreateMeeting}
+                    onDeleteMeeting={handleDeleteMeeting}
+                  />
+                )}
+
+                {currentTab === 'copilot' && (
+                  <AskAiPage
+                    meetings={meetings}
+                    initialPrompt={copilotInitialPrompt}
+                    onClearInitialPrompt={() => setCopilotInitialPrompt(null)}
+                    onSelectCitation={(meetingId, segmentId) => {
+                      const found = meetings.find((m) => m.id === meetingId);
+                      if (found) {
+                        handleSelectMeeting(found, segmentId);
+                      }
+                    }}
                   />
                 )}
 
                 {currentTab === 'live' && (
                   <LiveMeetingPage
                     meeting={liveMeeting}
+                    allMeetings={meetings}
+                    onSelectLiveMeeting={(m) => setLiveSelectedMeetingId(m.id)}
                     onStopMeeting={handleStopMeeting}
                     onSelectAnotherMeeting={() => setCurrentTab('overview')}
                   />
                 )}
 
-                {currentTab === 'details' && selectedMeeting && (
-                  <MeetingDetailsPage
-                    meeting={selectedMeeting}
-                    onBack={() => setCurrentTab('overview')}
-                    onDelete={handleDeleteMeeting}
-                  />
+                {currentTab === 'details' && (
+                  selectedMeeting ? (
+                    <MeetingDetailsPage
+                      meeting={selectedMeeting}
+                      initialSegmentId={highlightedSegmentId}
+                      onBack={() => setCurrentTab('overview')}
+                      onDelete={handleDeleteMeeting}
+                      onRename={handleRenameMeeting}
+                    />
+                  ) : (
+                    <HistoryPage
+                      meetings={filteredMeetings}
+                      onSelectMeeting={(m) => handleSelectMeeting(m)}
+                      onDeleteMeeting={handleDeleteMeeting}
+                    />
+                  )
                 )}
 
                 {currentTab === 'history' && (
                   <HistoryPage
                     meetings={filteredMeetings}
-                    onSelectMeeting={handleSelectMeeting}
+                    onSelectMeeting={(m) => handleSelectMeeting(m)}
+                    onDeleteMeeting={handleDeleteMeeting}
                   />
                 )}
 
-                {currentTab === 'settings' && <SettingsPage />}
+                {currentTab === 'action-items' && (
+                  <div className="space-y-6">
+                    <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <h1 className="text-xl font-extrabold text-slate-900 flex items-center space-x-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center">
+                            <CheckSquare className="w-4 h-4" />
+                          </div>
+                          <span>Workspace Action Items</span>
+                        </h1>
+                        <p className="text-xs text-slate-500 mt-1">
+                          All action items automatically extracted across your meetings with owners and verifiable transcript evidence.
+                        </p>
+                      </div>
+                      <span className="px-3.5 py-1.5 rounded-xl bg-violet-50 text-violet-700 border border-violet-200 text-xs font-bold self-start sm:self-center">
+                        {globalActionItems.length} Total Tasks
+                      </span>
+                    </div>
+
+                    {loadingGlobalActions ? (
+                      <div className="p-12 text-center text-xs text-slate-500 font-semibold animate-pulse">
+                        Loading action items across all meetings...
+                      </div>
+                    ) : globalActionItems.length === 0 ? (
+                      <div className="p-14 text-center rounded-3xl bg-white border border-dashed border-violet-200 space-y-2">
+                        <CheckSquare className="w-8 h-8 text-violet-400 mx-auto" />
+                        <p className="text-sm font-bold text-slate-800">
+                          No Action Items Extracted Yet
+                        </p>
+                        <p className="text-xs text-slate-500 max-w-md mx-auto">
+                          When action items or tasks with deadlines are discussed during a meeting, Vinxa AI automatically lists them here.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {globalActionItems.map(({ meeting, item }) => {
+                          const isDone = (item.status || '').toUpperCase() === 'DONE';
+                          return (
+                            <div
+                              key={item.id}
+                              className={`p-4 rounded-2xl bg-white border transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs ${
+                                isDone
+                                  ? 'border-slate-200/60 opacity-65'
+                                  : 'border-slate-200/90 hover:border-violet-300'
+                              }`}
+                            >
+                              <div className="flex items-start space-x-3">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleGlobalAction(meeting.id, item.id)}
+                                  className={`mt-0.5 p-1 rounded-lg hover:bg-violet-50 transition cursor-pointer ${
+                                    isDone ? 'text-emerald-600' : 'text-slate-400 hover:text-violet-600'
+                                  }`}
+                                >
+                                  {isDone ? (
+                                    <CheckSquare className="w-4 h-4" />
+                                  ) : (
+                                    <Square className="w-4 h-4" />
+                                  )}
+                                </button>
+                                <div>
+                                  <p
+                                    className={`text-sm font-bold ${
+                                      isDone ? 'line-through text-slate-400' : 'text-slate-900'
+                                    }`}
+                                  >
+                                    {item.task || item.title}
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-500 mt-1">
+                                    <span className="font-semibold text-violet-700">
+                                      {meeting.title}
+                                    </span>
+                                    {item.assignee && (
+                                      <>
+                                        <span>·</span>
+                                        <span>Owner: {item.assignee}</span>
+                                      </>
+                                    )}
+                                    {item.deadline && (
+                                      <>
+                                        <span>·</span>
+                                        <span>Due: {item.deadline}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                  {pushedGlobalMap[item.id]?.success && (
+                                    <details className="mt-2 text-xs">
+                                      <summary className="text-emerald-700 font-bold cursor-pointer select-none">
+                                        ✓ Dispatched to Webhook (HTTP {pushedGlobalMap[item.id].statusCode}) — View Payload
+                                      </summary>
+                                      <pre className="mt-1.5 p-2.5 rounded-xl bg-slate-900 text-violet-100 text-[11px] font-mono overflow-x-auto">
+                                        {JSON.stringify(pushedGlobalMap[item.id].payloadSent, null, 2)}
+                                      </pre>
+                                    </details>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handlePushGlobalActionWebhook(meeting.id, item.id)}
+                                  disabled={pushingGlobalId === item.id}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 border transition cursor-pointer ${
+                                    pushedGlobalMap[item.id]?.success
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                      : 'bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200'
+                                  }`}
+                                >
+                                  {pushedGlobalMap[item.id]?.success ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Pushed to DevOps / Jira</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Send className="w-3.5 h-3.5" />
+                                      <span>
+                                        {pushingGlobalId === item.id
+                                          ? 'Pushing...'
+                                          : 'Push to DevOps / Jira'}
+                                      </span>
+                                    </>
+                                  )}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectMeeting(meeting)}
+                                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center space-x-1 cursor-pointer"
+                                >
+                                  <span>Open Meeting</span>
+                                  <ArrowUpRight className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {currentTab === 'settings' && (
+                  <SettingsPage
+                    user={currentUser}
+                    meetings={meetings}
+                    onRefreshMeetings={fetchMeetings}
+                  />
+                )}
               </>
             )}
           </div>

@@ -12,4 +12,5 @@ import java.util.UUID;
 public interface MeetingRepository extends JpaRepository<Meeting, UUID> {
     Page<Meeting> findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(UUID userId, Pageable pageable);
     Optional<Meeting> findByIdAndDeletedAtIsNull(UUID id);
+    Optional<Meeting> findByShareTokenAndPublicSharedTrueAndDeletedAtIsNull(String shareToken);
 }

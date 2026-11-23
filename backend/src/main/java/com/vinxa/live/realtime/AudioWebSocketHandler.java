@@ -56,10 +56,11 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         UUID meetingId = extractMeetingId(session.getUri());
+        String language = extractLanguage(session.getUri());
         if (meetingId != null) {
             sessionToMeetingMap.put(session.getId(), meetingId);
             frameCounters.put(meetingId, 0L);
-            log.info("Audio WebSocket connected for meeting {}", meetingId);
+            log.info("Audio WebSocket connected for meeting {} [language={}]", meetingId, language);
 
             Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
             if (meeting != null && meeting.getStatus().canTransitionTo(MeetingStatus.RECORDING)) {
@@ -67,7 +68,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
                 meetingRepository.save(meeting);
             }
 
-            sttProvider.startSession(meetingId, (TranscriptEvent event) -> {
+            sttProvider.startSession(meetingId, language, (TranscriptEvent event) -> {
                 handleTranscriptEvent(meetingId, event);
             });
         }
@@ -80,8 +81,30 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
                 if (meeting != null) {
                     if (meeting.getStatus() != MeetingStatus.RECORDING && meeting.getStatus().canTransitionTo(MeetingStatus.RECORDING)) {
                         meeting.updateStatus(MeetingStatus.RECORDING);
-                        meetingRepository.save(meeting);
                     }
+
+                    // Auto-name meeting from live discussion if still on default code title
+                    if (com.vinxa.live.meeting.MeetingService.isGenericOrCodeOnlyTitle(meeting.getTitle())
+                            && event.text() != null && event.text().trim().length() > 14) {
+                        String code = com.vinxa.live.meeting.MeetingService.extractMeetingCode(
+                                meeting.getTitle(),
+                                meeting.getMeetingUrl(),
+                                meeting.getId()
+                        );
+                        String cleanTopic = event.text().trim()
+                                .replaceAll("^(?i)(welcome everyone to our|welcome everyone|today we need to|we have officially decided to|hello team,?)\\s*", "")
+                                .trim();
+                        if (!cleanTopic.isEmpty()) {
+                            cleanTopic = Character.toUpperCase(cleanTopic.charAt(0)) + cleanTopic.substring(1);
+                            if (cleanTopic.endsWith(".")) cleanTopic = cleanTopic.substring(0, cleanTopic.length() - 1);
+                            if (cleanTopic.length() > 40) {
+                                int sp = cleanTopic.lastIndexOf(' ', 40);
+                                cleanTopic = (sp > 14 ? cleanTopic.substring(0, sp) : cleanTopic.substring(0, 40)) + "…";
+                            }
+                            meeting.setTitle(cleanTopic + " • " + code);
+                        }
+                    }
+                    meetingRepository.save(meeting);
 
                     // Find or create participant
                     Participant participant = participantRepository.findByMeetingIdAndSpeakerKey(meetingId, event.speakerKey())
@@ -124,6 +147,11 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         if ("STOP_SESSION".equals(type)) {
             log.info("Received STOP_SESSION frame for meeting {}", meetingId);
             sttProvider.stopSession(meetingId);
+        } else if ("CHANGE_LANGUAGE".equals(type) || ("START_SESSION".equals(type) && map.get("language") != null)) {
+            String lang = (String) map.get("language");
+            if (lang != null && !lang.isBlank()) {
+                sttProvider.switchLanguage(meetingId, lang);
+            }
         }
     }
 
@@ -136,7 +164,13 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         byte[] payload = new byte[buffer.remaining()];
         buffer.get(payload);
 
-        frameCounters.compute(meetingId, (k, v) -> (v == null ? 0L : v) + payload.length);
+        frameCounters.compute(meetingId, (k, v) -> {
+            long total = (v == null ? 0L : v) + payload.length;
+            if (total % 160000 < payload.length) {
+                log.info("Received audio stream: total {} bytes for meeting {}", total, meetingId);
+            }
+            return total;
+        });
         sttProvider.sendAudioChunk(meetingId, payload);
     }
 
@@ -162,5 +196,16 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             }
         }
         return UUID.randomUUID();
+    }
+
+    private String extractLanguage(URI uri) {
+        if (uri == null || uri.getQuery() == null) return "multi";
+        for (String param : uri.getQuery().split("&")) {
+            String[] pair = param.split("=");
+            if (pair.length == 2 && ("language".equals(pair[0]) || "lang".equals(pair[0]))) {
+                return java.net.URLDecoder.decode(pair[1], java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+        return "multi";
     }
 }

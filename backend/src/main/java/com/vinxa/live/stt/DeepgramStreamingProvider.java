@@ -9,12 +9,15 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -33,7 +36,8 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
     private final Map<UUID, WebSocket> activeSockets = new ConcurrentHashMap<>();
     private final Map<UUID, Consumer<TranscriptEvent>> activeConsumers = new ConcurrentHashMap<>();
     private final Map<UUID, StringBuilder> messageBuffers = new ConcurrentHashMap<>();
-    private final Map<UUID, java.util.concurrent.CompletableFuture<?>> sendPipelines = new ConcurrentHashMap<>();
+    private final Map<UUID, CompletableFuture<?>> sendPipelines = new ConcurrentHashMap<>();
+    private final Map<UUID, String> sessionLanguages = new ConcurrentHashMap<>();
 
     public DeepgramStreamingProvider(
             @Value("${vinxa.deepgram.api-key:}") String apiKey,
@@ -48,34 +52,91 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
 
     @Override
     public void startSession(UUID meetingId, Consumer<TranscriptEvent> eventConsumer) {
+        startSession(meetingId, "multi", eventConsumer);
+    }
+
+    @Override
+    public void startSession(UUID meetingId, String language, Consumer<TranscriptEvent> eventConsumer) {
         if (apiKey.isEmpty()) {
             log.info("Deepgram API key not provided. Falling back to synthetic provider for meeting {}", meetingId);
             fallbackProvider.startSession(meetingId, eventConsumer);
             return;
         }
 
+        String normalizedLang = normalizeLanguageCode(language);
         activeConsumers.put(meetingId, eventConsumer);
         messageBuffers.put(meetingId, new StringBuilder());
+        sessionLanguages.put(meetingId, normalizedLang);
 
+        connectDeepgramSocket(meetingId, normalizedLang, eventConsumer, true);
+    }
+
+    @Override
+    public void switchLanguage(UUID meetingId, String language) {
+        String normalizedLang = normalizeLanguageCode(language);
+        String currentLang = sessionLanguages.get(meetingId);
+        if (normalizedLang.equalsIgnoreCase(currentLang) && activeSockets.containsKey(meetingId)) {
+            return;
+        }
+
+        Consumer<TranscriptEvent> consumer = activeConsumers.get(meetingId);
+        if (consumer == null) {
+            sessionLanguages.put(meetingId, normalizedLang);
+            return;
+        }
+
+        log.info("Switching Deepgram live STT language for meeting {} from {} to {}", meetingId, currentLang, normalizedLang);
+        sessionLanguages.put(meetingId, normalizedLang);
+
+        // Close existing socket gracefully before opening the new language socket
+        WebSocket oldWs = activeSockets.remove(meetingId);
+        sendPipelines.remove(meetingId);
+        if (oldWs != null) {
+            try {
+                oldWs.sendClose(WebSocket.NORMAL_CLOSURE, "Language switch");
+            } catch (Exception ignored) {
+            }
+        }
+
+        connectDeepgramSocket(meetingId, normalizedLang, consumer, true);
+    }
+
+    private void connectDeepgramSocket(UUID meetingId, String lang, Consumer<TranscriptEvent> eventConsumer, boolean allowFallbackToMulti) {
         try {
-            String url = "wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&channels=1&diarize=true&punctuate=true&interim_results=true";
+            String encodedLang = URLEncoder.encode(lang, StandardCharsets.UTF_8);
+            String url = "wss://api.deepgram.com/v1/listen?model=nova-2"
+                    + "&language=" + encodedLang
+                    + "&encoding=linear16&sample_rate=16000&channels=1"
+                    + "&diarize=true&punctuate=true&smart_format=true&interim_results=true&endpointing=300";
 
             httpClient.newWebSocketBuilder()
                     .header("Authorization", "Token " + apiKey)
                     .buildAsync(URI.create(url), new DeepgramWebSocketListener(meetingId))
                     .thenAccept(ws -> {
                         activeSockets.put(meetingId, ws);
-                        log.info("Connected to Deepgram Live Streaming STT for meeting {}", meetingId);
+                        log.info("Connected to Deepgram Nova-2 Live Streaming STT [language={}] for meeting {}", lang, meetingId);
                     })
                     .exceptionally(ex -> {
-                        log.warn("Failed to connect to Deepgram ({}). Falling back to synthetic provider.", ex.getMessage());
-                        fallbackProvider.startSession(meetingId, eventConsumer);
+                        log.warn("Failed connecting Deepgram with language={} ({}).", lang, ex.getMessage());
+                        if (allowFallbackToMulti && !"en".equals(lang)) {
+                            log.info("Retrying Deepgram connection with fallback language=en for meeting {}", meetingId);
+                            connectDeepgramSocket(meetingId, "en", eventConsumer, false);
+                        } else {
+                            fallbackProvider.startSession(meetingId, eventConsumer);
+                        }
                         return null;
                     });
         } catch (Exception e) {
             log.warn("Deepgram initialization error: {}. Using fallback.", e.getMessage());
             fallbackProvider.startSession(meetingId, eventConsumer);
         }
+    }
+
+    private String normalizeLanguageCode(String language) {
+        if (language == null || language.isBlank() || "auto".equalsIgnoreCase(language)) {
+            return "multi";
+        }
+        return language.trim();
     }
 
     @Override
@@ -102,26 +163,29 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
     @Override
     public void stopSession(UUID meetingId) {
         sendPipelines.remove(meetingId);
+        sessionLanguages.remove(meetingId);
         WebSocket ws = activeSockets.remove(meetingId);
         if (ws != null) {
             try {
-                // Deepgram empty buffer close signal to flush transcription pipeline
                 ws.sendBinary(ByteBuffer.allocate(0), true)
                         .thenRun(() -> {
                             try {
                                 ws.sendClose(WebSocket.NORMAL_CLOSURE, "Session ended");
-                            } catch (Exception e1) {}
+                            } catch (Exception ignored) {
+                            }
                         })
                         .exceptionally(ex -> {
                             try {
                                 ws.sendClose(WebSocket.NORMAL_CLOSURE, "Session ended");
-                            } catch (Exception e2) {}
+                            } catch (Exception ignored) {
+                            }
                             return null;
                         });
             } catch (Exception e3) {
                 try {
                     ws.sendClose(WebSocket.NORMAL_CLOSURE, "Session ended");
-                } catch (Exception e4) {}
+                } catch (Exception ignored) {
+                }
             }
         }
         activeConsumers.remove(meetingId);
@@ -159,14 +223,14 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
         @Override
         public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
             log.info("Deepgram WebSocket closed for meeting {}: {} - {}", meetingId, statusCode, reason);
-            activeSockets.remove(meetingId);
+            activeSockets.remove(meetingId, webSocket);
             return null;
         }
 
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
             log.warn("Deepgram WebSocket error for meeting {}: {}", meetingId, error.getMessage());
-            activeSockets.remove(meetingId);
+            activeSockets.remove(meetingId, webSocket);
         }
     }
 
@@ -182,6 +246,7 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
             if (transcript.isBlank()) return;
 
             boolean isFinal = root.path("is_final").asBoolean(true);
+            log.info("Deepgram speech transcribed for meeting {} [isFinal={}]: {}", meetingId, isFinal, transcript);
             double confidence = bestAlt.path("confidence").asDouble(0.95);
 
             String speakerKey = "speaker-1";

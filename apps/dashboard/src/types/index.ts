@@ -41,6 +41,7 @@ export interface Decision {
 export interface ActionItem {
   id: string;
   task: string;
+  title?: string;
   assignee: string | null;
   deadline: string | null;
   priority: 'LOW' | 'MEDIUM' | 'HIGH';
@@ -49,6 +50,7 @@ export interface ActionItem {
 }
 
 export interface MeetingSummary {
+  suggestedTitle?: string | null;
   overview: string;
   keyPoints: string[];
   decisions: Decision[];
@@ -65,6 +67,77 @@ export interface Meeting {
   startedAt: string | null;
   endedAt: string | null;
   createdAt: string;
-  participants: Participant[];
+  participants?: Participant[];
+  participantCount?: number;
+  segmentCount?: number;
+  actionItemCount?: number;
+  decisionCount?: number;
   summary?: MeetingSummary;
+  shareToken?: string | null;
+  publicShared?: boolean;
+}
+
+export interface PublicSharedMeetingData {
+  meeting: Meeting;
+  sharedBy: string;
+  summary: MeetingSummary | null;
+  actionItems: ActionItem[];
+  transcript: TranscriptSegment[];
+}
+
+export interface CopilotCitation {
+  meetingId: string;
+  meetingTitle: string;
+  meetingDate?: string;
+  segmentId?: string | null;
+  speaker: string;
+  quote: string;
+}
+
+export interface CopilotAskResponse {
+  answer: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  meetingsAnalyzed: number;
+  segmentsAnalyzed: number;
+  citations: CopilotCitation[];
+  suggestedFollowUps: string[];
+}
+
+export interface CopilotChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+}
+
+export interface SearchResultItem {
+  segmentId: string;
+  meetingId: string;
+  meetingTitle: string;
+  content: string;
+  startMs: number;
+}
+
+export interface VinxaSettings {
+  defaultSpokenLanguage: string;
+  defaultTranslationLanguage: string;
+  tabAudioEnabled: boolean;
+  micAudioEnabled: boolean;
+  autoPurgeDays: number;
+  autoScrollLive: boolean;
+  onScreenCaptionsEnabled: boolean;
+  webhookUrl: string;
+  webhookSecret?: string;
+  webhookAutoPush: boolean;
+}
+
+export interface WebhookDispatchResult {
+  success: boolean;
+  statusCode: number;
+  responseMessage: string;
+  webhookUrl: string;
+  payloadSent: Record<string, any>;
 }

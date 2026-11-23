@@ -66,10 +66,28 @@ public class MeetingController {
         return ResponseEntity.ok(meetingService.stopMeeting(user, id));
     }
 
+    @PostMapping("/{id}/reanalyze")
+    public ResponseEntity<MeetingResponse> reanalyzeMeeting(@PathVariable UUID id) {
+        User user = SecurityUtils.getCurrentUser();
+        return ResponseEntity.ok(meetingService.reanalyzeMeeting(user, id));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteMeeting(@PathVariable UUID id) {
         User user = SecurityUtils.getCurrentUser();
         meetingService.deleteMeeting(user, id);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{id}/share")
+    public ResponseEntity<MeetingResponse> enablePublicShare(@PathVariable UUID id) {
+        User user = SecurityUtils.getCurrentUser();
+        return ResponseEntity.ok(meetingService.enablePublicShare(user, id));
+    }
+
+    @DeleteMapping("/{id}/share")
+    public ResponseEntity<MeetingResponse> disablePublicShare(@PathVariable UUID id) {
+        User user = SecurityUtils.getCurrentUser();
+        return ResponseEntity.ok(meetingService.disablePublicShare(user, id));
     }
 }

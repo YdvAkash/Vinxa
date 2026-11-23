@@ -35,17 +35,20 @@ public class AiSummaryService {
     private final TranscriptSegmentRepository transcriptSegmentRepository;
     private final MeetingSummaryRepository meetingSummaryRepository;
     private final ActionItemRepository actionItemRepository;
+    private final com.vinxa.live.webhook.WebhookDispatcherService webhookDispatcherService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient;
 
     private final String geminiApiKey;
     private final String geminiModel;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public AiSummaryService(
             MeetingRepository meetingRepository,
             TranscriptSegmentRepository transcriptSegmentRepository,
             MeetingSummaryRepository meetingSummaryRepository,
             ActionItemRepository actionItemRepository,
+            com.vinxa.live.webhook.WebhookDispatcherService webhookDispatcherService,
             @Value("${vinxa.gemini.api-key:}") String geminiApiKey,
             @Value("${vinxa.gemini.model:gemini-1.5-flash}") String geminiModel
     ) {
@@ -53,11 +56,23 @@ public class AiSummaryService {
         this.transcriptSegmentRepository = transcriptSegmentRepository;
         this.meetingSummaryRepository = meetingSummaryRepository;
         this.actionItemRepository = actionItemRepository;
+        this.webhookDispatcherService = webhookDispatcherService;
         this.geminiApiKey = geminiApiKey != null ? geminiApiKey.trim() : "";
         this.geminiModel = geminiModel != null ? geminiModel.trim() : "gemini-1.5-flash";
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
                 .build();
+    }
+
+    public AiSummaryService(
+            MeetingRepository meetingRepository,
+            TranscriptSegmentRepository transcriptSegmentRepository,
+            MeetingSummaryRepository meetingSummaryRepository,
+            ActionItemRepository actionItemRepository,
+            String geminiApiKey,
+            String geminiModel
+    ) {
+        this(meetingRepository, transcriptSegmentRepository, meetingSummaryRepository, actionItemRepository, null, geminiApiKey, geminiModel);
     }
 
     @Async
@@ -105,9 +120,20 @@ public class AiSummaryService {
 
         try {
             String summaryJson = objectMapper.writeValueAsString(response);
+            MeetingSummary existingSummary = meetingSummaryRepository.findByMeetingId(meetingId).orElse(null);
+            if (existingSummary != null) {
+                meetingSummaryRepository.delete(existingSummary);
+                meetingSummaryRepository.flush();
+            }
             MeetingSummary summary = new MeetingSummary(UUID.randomUUID(), meeting, summaryJson);
             meetingSummaryRepository.save(summary);
 
+            List<ActionItem> oldActions = actionItemRepository.findByMeetingIdOrderByCreatedAtAsc(meetingId);
+            if (!oldActions.isEmpty()) {
+                actionItemRepository.deleteAll(oldActions);
+            }
+
+            List<ActionItem> savedActions = new ArrayList<>();
             for (AiSummaryResponse.ActionItemDto dto : response.actionItems()) {
                 String evidence = dto.evidenceSegmentIds() != null ? String.join(",", dto.evidenceSegmentIds()) : null;
                 ActionItem actionItem = new ActionItem(
@@ -119,17 +145,110 @@ public class AiSummaryService {
                         dto.priority() != null ? dto.priority() : "MEDIUM",
                         evidence
                 );
-                actionItemRepository.save(actionItem);
+                savedActions.add(actionItemRepository.save(actionItem));
             }
 
+            meeting.setTitle(resolveSmartMeetingTitle(meeting, segments, response));
             meeting.updateStatus(MeetingStatus.ANALYSIS_COMPLETED);
             meetingRepository.save(meeting);
-            log.info("Meeting analysis completed successfully for meeting {}", meetingId);
+            if (webhookDispatcherService != null && !savedActions.isEmpty()) {
+                webhookDispatcherService.autoDispatchMeetingActionItemsIfEnabled(meeting, savedActions, segments);
+            }
+            log.info("Meeting analysis completed successfully for meeting {} [Title='{}']", meetingId, meeting.getTitle());
         } catch (Exception e) {
             log.error("Failed to save meeting analysis: {}", e.getMessage());
             meeting.updateStatus(MeetingStatus.ERROR);
             meetingRepository.save(meeting);
         }
+    }
+
+    @jakarta.annotation.PostConstruct
+    public void backfillExistingMeetingTitles() {
+        try {
+            List<Meeting> allMeetings = meetingRepository.findAll();
+            for (Meeting m : allMeetings) {
+                if (m.getDeletedAt() != null) continue;
+                if (com.vinxa.live.meeting.MeetingService.isGenericOrCodeOnlyTitle(m.getTitle())) {
+                    List<TranscriptSegment> segs = transcriptSegmentRepository.findByMeetingIdOrderByStartMsAsc(m.getId());
+                    MeetingSummary sum = meetingSummaryRepository.findByMeetingId(m.getId()).orElse(null);
+                    AiSummaryResponse parsedSum = null;
+                    if (sum != null && sum.getSummary() != null) {
+                        try {
+                            parsedSum = objectMapper.readValue(sum.getSummary(), AiSummaryResponse.class);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    String newTitle = resolveSmartMeetingTitle(m, segs, parsedSum);
+                    if (!newTitle.equals(m.getTitle())) {
+                        m.setTitle(newTitle);
+                        meetingRepository.save(m);
+                        log.info("Backfilled smart meeting title for {}: '{}'", m.getId(), newTitle);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Could not backfill meeting titles on startup: {}", e.getMessage());
+        }
+    }
+
+    private String resolveSmartMeetingTitle(Meeting meeting, List<TranscriptSegment> segments, AiSummaryResponse response) {
+        String code = com.vinxa.live.meeting.MeetingService.extractMeetingCode(
+                meeting.getTitle(),
+                meeting.getMeetingUrl(),
+                meeting.getId()
+        );
+        String defaultCodeTitle = com.vinxa.live.meeting.MeetingService.formatDefaultCodeTitle(meeting.getPlatform(), code);
+
+        if (segments == null || segments.isEmpty()) {
+            return defaultCodeTitle;
+        }
+
+        // 1. Use Gemini's suggestedTitle if provided and meaningful
+        if (response != null && response.suggestedTitle() != null && !response.suggestedTitle().isBlank()) {
+            String clean = response.suggestedTitle().trim();
+            if (!com.vinxa.live.meeting.MeetingService.isGenericOrCodeOnlyTitle(clean)) {
+                return clean.contains(code) ? clean : clean + " • " + code;
+            }
+        }
+
+        // 2. Derive topic from confirmed decision or action item if present
+        if (response != null) {
+            if (response.decisions() != null && !response.decisions().isEmpty()) {
+                String dec = response.decisions().get(0).decision();
+                if (dec != null && !dec.isBlank() && !dec.startsWith("Approved end-to-end integration")) {
+                    String shortTopic = shortenTopic(dec, 44);
+                    return shortTopic + " • " + code;
+                }
+            }
+            if (response.actionItems() != null && !response.actionItems().isEmpty()) {
+                String task = response.actionItems().get(0).task();
+                if (task != null && !task.isBlank() && !task.startsWith("Verify Chrome MV3")) {
+                    String shortTopic = shortenTopic(task, 44);
+                    return shortTopic + " • " + code;
+                }
+            }
+        }
+
+        // 3. Derive from actual spoken transcript segments
+        for (TranscriptSegment seg : segments) {
+            String text = seg.getContent() != null ? seg.getContent().trim() : "";
+            if (text.length() > 12) {
+                String shortTopic = shortenTopic(text, 42);
+                return shortTopic + " • " + code;
+            }
+        }
+
+        return defaultCodeTitle;
+    }
+
+    private String shortenTopic(String raw, int maxLen) {
+        String clean = raw.replaceAll("^(?i)(welcome everyone to our|welcome everyone|today we need to|we have officially decided to|agreed\\.|hello team,?)\\s*", "").trim();
+        if (clean.isEmpty()) clean = raw.trim();
+        clean = Character.toUpperCase(clean.charAt(0)) + clean.substring(1);
+        if (clean.endsWith(".")) clean = clean.substring(0, clean.length() - 1);
+        if (clean.length() <= maxLen) return clean;
+        int lastSpace = clean.lastIndexOf(' ', maxLen);
+        return (lastSpace > 15 ? clean.substring(0, lastSpace) : clean.substring(0, maxLen)) + "…";
     }
 
     private AiSummaryResponse callGeminiApiWithModel(Meeting meeting, List<TranscriptSegment> segments, String modelName) throws Exception {
@@ -149,7 +268,8 @@ public class AiSummaryService {
                 2. Distinguish proposals from confirmed agreements.
                 3. Use null for any unknown assignee or deadline.
                 4. For each confirmed decision and action item, include the evidenceSegmentIds array referencing the exact Segment UUIDs.
-                5. Return valid JSON only with keys: overview (string), keyPoints (string array), decisions (array of {decision, reason, evidenceSegmentIds}), actionItems (array of {task, assignee, deadline, priority, evidenceSegmentIds}), openQuestions (string array).
+                5. Generate a concise, descriptive `suggestedTitle` (3 to 6 words, e.g., "Platform Launch & PR Review") based on the actual discussion in the transcript. If the transcript has no substantive discussion, set `suggestedTitle` to null.
+                6. Return valid JSON only with keys: suggestedTitle (string or null), overview (string), keyPoints (string array), decisions (array of {decision, reason, evidenceSegmentIds}), actionItems (array of {task, assignee, deadline, priority, evidenceSegmentIds}), openQuestions (string array).
                 
                 Transcript:
                 %s
