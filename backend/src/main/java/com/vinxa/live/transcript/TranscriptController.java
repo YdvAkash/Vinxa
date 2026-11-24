@@ -291,6 +291,44 @@ public class TranscriptController {
         return ResponseEntity.ok(participant);
     }
 
+    @PostMapping("/joinees")
+    public ResponseEntity<Map<String, Object>> syncMeetingJoinees(
+            @PathVariable("id") UUID meetingId,
+            @RequestBody Map<String, Object> body
+    ) {
+        User user = SecurityUtils.getCurrentUser();
+        meetingService.getMeetingAndVerifyOwnership(user, meetingId);
+
+        List<String> joinees = new java.util.ArrayList<>();
+        Object rawList = body != null ? body.get("joinees") : null;
+        if (rawList instanceof List<?> list) {
+            for (Object item : list) {
+                if (item != null && !item.toString().isBlank()) {
+                    joinees.add(item.toString().trim());
+                }
+            }
+        }
+        String activeSpeaker = body != null && body.get("activeSpeaker") != null
+                ? body.get("activeSpeaker").toString().trim()
+                : null;
+
+        // Also seed authenticated user's derived display name as fallback joinee if roster is empty
+        if (joinees.isEmpty() && user.getEmail() != null) {
+            String derived = com.vinxa.live.realtime.AudioWebSocketHandler.deriveDisplayNameFromEmail(user.getEmail());
+            if (derived != null) joinees.add(derived);
+        }
+
+        Map<String, String> assigned = audioWebSocketHandler != null
+                ? audioWebSocketHandler.syncMeetingJoinees(meetingId, joinees, activeSpeaker)
+                : Map.of();
+
+        return ResponseEntity.ok(Map.of(
+                "meetingId", meetingId.toString(),
+                "joinees", joinees,
+                "assignedSpeakers", assigned
+        ));
+    }
+
     public record TranscriptSegmentDto(
             UUID id,
             UUID meetingId,

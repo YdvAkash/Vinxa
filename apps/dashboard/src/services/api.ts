@@ -304,6 +304,18 @@ export const api = {
     });
   },
 
+  async syncMeetingJoinees(
+    meetingId: string,
+    joinees: string[],
+    activeSpeaker?: string | null
+  ): Promise<{ meetingId: string; joinees: string[]; assignedSpeakers: Record<string, string> }> {
+    const res = await authFetch(`/meetings/${meetingId}/joinees`, {
+      method: 'POST',
+      body: JSON.stringify({ joinees, activeSpeaker: activeSpeaker || null })
+    });
+    return res.json();
+  },
+
   async getSummary(meetingId: string): Promise<MeetingSummary | null> {
     try {
       const res = await authFetch(`/meetings/${meetingId}/summary`);

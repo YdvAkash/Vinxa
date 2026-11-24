@@ -76,6 +76,9 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
   const [translating, setTranslating] = useState<boolean>(false);
   const [switchingLang, setSwitchingLang] = useState<boolean>(false);
   const [copiedAll, setCopiedAll] = useState<boolean>(false);
+  const [joineeInput, setJoineeInput] = useState<string>('');
+  const [syncedJoinees, setSyncedJoinees] = useState<string[]>([]);
+  const [syncingJoinees, setSyncingJoinees] = useState<boolean>(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const feedEndRef = useRef<HTMLDivElement>(null);
@@ -96,6 +99,49 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
   useEffect(() => {
     setTranslations({});
   }, [targetTranslation, meeting?.id]);
+
+  // Automatically seed authenticated host / detected joinees on meeting selection
+  useEffect(() => {
+    if (!meeting?.id) return;
+    api
+      .syncMeetingJoinees(meeting.id, [])
+      .then((res) => {
+        if (Array.isArray(res.joinees) && res.joinees.length > 0) {
+          setSyncedJoinees(res.joinees);
+        }
+      })
+      .catch(() => {});
+  }, [meeting?.id]);
+
+  const handleSyncJoinees = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!meeting || !joineeInput.trim()) return;
+    const names = joineeInput
+      .split(',')
+      .map((n) => n.trim())
+      .filter(Boolean);
+    if (names.length === 0) return;
+    setSyncingJoinees(true);
+    try {
+      const merged = Array.from(new Set([...syncedJoinees, ...names]));
+      const res = await api.syncMeetingJoinees(meeting.id, merged, names[0]);
+      setSyncedJoinees(res.joinees || merged);
+      setJoineeInput('');
+      if (res.assignedSpeakers) {
+        setSegments((prev) =>
+          prev.map((s) =>
+            res.assignedSpeakers[s.speakerKey]
+              ? { ...s, speakerName: res.assignedSpeakers[s.speakerKey] }
+              : s
+          )
+        );
+      }
+    } catch (err) {
+      console.warn('Joinee sync error:', err);
+    } finally {
+      setSyncingJoinees(false);
+    }
+  };
 
   useEffect(() => {
     if (targetTranslation === 'ORIGINAL' || segments.length === 0) return;
@@ -357,6 +403,47 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
             </select>
           </div>
         </div>
+      </div>
+
+      {/* Automatic Joinee-to-Speaker Name Assignment Bar */}
+      <div className="p-4 rounded-3xl bg-white border border-slate-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center space-x-3 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center shrink-0">
+            <Users className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-extrabold text-slate-900">
+                Auto-Assign Speaker Names from Meeting Joinees
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                Auto-Detected from Call & Speech
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 truncate">
+              {syncedJoinees.length > 0
+                ? `Active Joinees Mapped: ${syncedJoinees.join(' · ')}`
+                : 'Joinees are automatically detected from Google Meet / Teams / Zoom tiles or self-introductions.'}
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSyncJoinees} className="flex items-center gap-2 shrink-0">
+          <input
+            type="text"
+            value={joineeInput}
+            onChange={(e) => setJoineeInput(e.target.value)}
+            placeholder="Add joinees (e.g. Akash, Priya, Rohit)"
+            className="bg-[#fbfaff] border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-violet-400 w-56 sm:w-64"
+          />
+          <button
+            type="submit"
+            disabled={!joineeInput.trim() || syncingJoinees}
+            className="px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-xs font-bold transition cursor-pointer"
+          >
+            {syncingJoinees ? 'Assigning...' : 'Auto-Assign'}
+          </button>
+        </form>
       </div>
 
       {/* Main Transcript Stream Card (Transcript Copy & Download buttons placed here) */}

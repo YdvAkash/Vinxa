@@ -22,15 +22,26 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import java.net.URI;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class AudioWebSocketHandler extends AbstractWebSocketHandler {
 
     private static final Logger log = LoggerFactory.getLogger(AudioWebSocketHandler.class);
+
+    private static final Pattern SELF_INTRO_PATTERN = Pattern.compile(
+            "\\b(?:my name is|this is|i am|i'm)\\s+([A-Z][a-z]{2,18}(?:\\s+[A-Z][a-z]{2,18})?)\\b"
+    );
+    private static final Set<String> NON_NAME_WORDS = Set.of(
+            "going", "ready", "here", "working", "happy", "sure", "calling", "sharing",
+            "looking", "trying", "thinking", "talking", "saying", "asking", "doing",
+            "fine", "good", "great", "able", "unable", "sorry", "glad", "excited",
+            "starting", "joining", "presenting", "recording", "testing", "checking",
+            "currently", "actually", "really", "just", "also", "still", "done", "back"
+    );
 
     private final SpeechToTextProvider sttProvider;
     private final EventWebSocketHandler eventWebSocketHandler;
@@ -42,6 +53,8 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
     private final Map<String, UUID> sessionToMeetingMap = new ConcurrentHashMap<>();
     private final Map<UUID, Long> frameCounters = new ConcurrentHashMap<>();
     private final Map<UUID, Map<String, String>> speakerDisplayNames = new ConcurrentHashMap<>();
+    private final Map<UUID, CopyOnWriteArrayList<String>> meetingJoineesRoster = new ConcurrentHashMap<>();
+    private final Map<UUID, String> activeDomSpeakerByMeeting = new ConcurrentHashMap<>();
     private final Map<UUID, Boolean> meetingTitleResolved = new ConcurrentHashMap<>();
     private final ExecutorService persistenceExecutor;
 
@@ -69,20 +82,236 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         persistenceExecutor.shutdown();
     }
 
+    public static boolean isGenericSpeakerLabel(String name) {
+        if (name == null || name.isBlank()) return true;
+        String trimmed = name.trim().toLowerCase();
+        return trimmed.equals("speaker")
+                || trimmed.matches("^speaker\\s*[-_]?\\s*\\d+$")
+                || trimmed.equals("unknown")
+                || trimmed.equals("participant")
+                || trimmed.equals("user");
+    }
+
+    public static String deriveDisplayNameFromEmail(String email) {
+        if (email == null || email.isBlank() || !email.contains("@")) return null;
+        String local = email.substring(0, email.indexOf('@')).trim();
+        local = local.replaceAll("\\d+$", "");
+        String[] parts = local.split("[._-]+");
+        StringBuilder sb = new StringBuilder();
+        for (String part : parts) {
+            String clean = part.replaceAll("[^a-zA-Z]", "").trim();
+            if (clean.length() >= 2 && !clean.equalsIgnoreCase("user") && !clean.equalsIgnoreCase("test") && !clean.equalsIgnoreCase("e2e")) {
+                if (!sb.isEmpty()) sb.append(' ');
+                sb.append(Character.toUpperCase(clean.charAt(0))).append(clean.substring(1).toLowerCase());
+            }
+        }
+        return sb.isEmpty() ? null : sb.toString();
+    }
+
+    public static String extractSelfIntroducedName(String text) {
+        if (text == null || text.length() < 6) return null;
+        Matcher matcher = SELF_INTRO_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String candidate = matcher.group(1).trim();
+            String[] tokens = candidate.split("\\s+");
+            if (tokens.length == 0) continue;
+            String firstLower = tokens[0].toLowerCase();
+            if (NON_NAME_WORDS.contains(firstLower)) continue;
+            if (tokens.length > 1 && NON_NAME_WORDS.contains(tokens[1].toLowerCase())) {
+                candidate = tokens[0];
+            }
+            if (candidate.length() >= 3 && candidate.length() <= 35 && !isGenericSpeakerLabel(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
     public void registerSpeakerDisplayName(UUID meetingId, String speakerKey, String displayName) {
         if (meetingId == null || speakerKey == null || displayName == null || displayName.isBlank()) return;
+        String cleanName = displayName.trim();
         speakerDisplayNames
                 .computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>())
-                .put(speakerKey, displayName.trim());
+                .put(speakerKey, cleanName);
+        addJoineeToRoster(meetingId, cleanName);
         eventWebSocketHandler.broadcastToMeeting(
                 meetingId,
                 Map.of(
                         "type", "SPEAKER_RENAMED",
                         "meetingId", meetingId.toString(),
                         "speakerKey", speakerKey,
-                        "speakerName", displayName.trim()
+                        "speakerName", cleanName
                 )
         );
+    }
+
+    private void addJoineeToRoster(UUID meetingId, String joineeName) {
+        if (joineeName == null || joineeName.isBlank() || isGenericSpeakerLabel(joineeName)) return;
+        String clean = joineeName.trim();
+        CopyOnWriteArrayList<String> roster = meetingJoineesRoster.computeIfAbsent(meetingId, k -> new CopyOnWriteArrayList<>());
+        boolean exists = roster.stream().anyMatch(existing -> existing.equalsIgnoreCase(clean));
+        if (!exists) {
+            roster.add(clean);
+        }
+    }
+
+    /**
+     * Synchronizes real meeting joinee names scraped from the active Google Meet, MS Teams, or Zoom call
+     * and automatically assigns them to existing or incoming diarized speakers.
+     */
+    public Map<String, String> syncMeetingJoinees(UUID meetingId, List<String> joinees, String activeSpeaker) {
+        if (meetingId == null) return Map.of();
+
+        if (joinees != null) {
+            for (String j : joinees) {
+                if (j != null && !j.isBlank() && !isGenericSpeakerLabel(j)) {
+                    addJoineeToRoster(meetingId, j.trim());
+                }
+            }
+        }
+
+        if (activeSpeaker != null && !activeSpeaker.isBlank() && !isGenericSpeakerLabel(activeSpeaker)) {
+            String cleanActive = activeSpeaker.trim();
+            activeDomSpeakerByMeeting.put(meetingId, cleanActive);
+            addJoineeToRoster(meetingId, cleanActive);
+        }
+
+        CopyOnWriteArrayList<String> roster = meetingJoineesRoster.computeIfAbsent(meetingId, k -> new CopyOnWriteArrayList<>());
+        Map<String, String> nameMap = speakerDisplayNames.computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>());
+
+        if (!roster.isEmpty()) {
+            // Pre-assign or upgrade generic speaker-1, speaker-2, ... to real joinees in order
+            for (int i = 0; i < roster.size(); i++) {
+                String speakerKey = "speaker-" + (i + 1);
+                String currentAssigned = nameMap.get(speakerKey);
+                if (currentAssigned == null || isGenericSpeakerLabel(currentAssigned)) {
+                    String joineeName = findFirstUnassignedJoinee(roster, nameMap, roster.get(i));
+                    if (joineeName != null) {
+                        assignAndPersistJoineeToSpeaker(meetingId, speakerKey, joineeName);
+                    }
+                }
+            }
+        }
+
+        return Map.copyOf(nameMap);
+    }
+
+    private String findFirstUnassignedJoinee(List<String> roster, Map<String, String> assignedMap, String preferred) {
+        Set<String> usedLower = new HashSet<>();
+        for (String val : assignedMap.values()) {
+            if (val != null && !isGenericSpeakerLabel(val)) {
+                usedLower.add(val.toLowerCase());
+            }
+        }
+        if (preferred != null && !usedLower.contains(preferred.toLowerCase())) {
+            return preferred;
+        }
+        for (String candidate : roster) {
+            if (!usedLower.contains(candidate.toLowerCase())) {
+                return candidate;
+            }
+        }
+        return preferred;
+    }
+
+    private void assignAndPersistJoineeToSpeaker(UUID meetingId, String speakerKey, String joineeName) {
+        if (joineeName == null || joineeName.isBlank() || isGenericSpeakerLabel(joineeName)) return;
+        String cleanName = joineeName.trim();
+        Map<String, String> nameMap = speakerDisplayNames.computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>());
+        String previous = nameMap.put(speakerKey, cleanName);
+
+        if (!cleanName.equals(previous)) {
+            eventWebSocketHandler.broadcastToMeeting(
+                    meetingId,
+                    Map.of(
+                            "type", "SPEAKER_RENAMED",
+                            "meetingId", meetingId.toString(),
+                            "speakerKey", speakerKey,
+                            "speakerName", cleanName
+                    )
+            );
+            CompletableFuture.runAsync(() -> {
+                try {
+                    Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
+                    if (meeting == null) return;
+                    Participant participant = participantRepository.findByMeetingIdAndSpeakerKey(meetingId, speakerKey)
+                            .orElseGet(() -> new Participant(UUID.randomUUID(), meeting, speakerKey, cleanName));
+                    if (!cleanName.equals(participant.getDisplayName())) {
+                        participant.setDisplayName(cleanName);
+                    }
+                    participantRepository.save(participant);
+                } catch (Exception e) {
+                    log.debug("Failed persisting auto-assigned joinee {} for {}: {}", cleanName, speakerKey, e.getMessage());
+                }
+            }, persistenceExecutor);
+        }
+    }
+
+    private String resolveOrAutoAssignJoineeName(UUID meetingId, String speakerKey, String providerSpeakerName, String transcriptText) {
+        Map<String, String> nameMap = speakerDisplayNames.computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>());
+        String cachedName = nameMap.get(speakerKey);
+
+        // 1. Check if the speaker introduced themselves in this utterance ("Hi, this is Rahul" / "My name is Priya")
+        if (cachedName == null || isGenericSpeakerLabel(cachedName)) {
+            String selfIntroName = extractSelfIntroducedName(transcriptText);
+            if (selfIntroName != null) {
+                addJoineeToRoster(meetingId, selfIntroName);
+                assignAndPersistJoineeToSpeaker(meetingId, speakerKey, selfIntroName);
+                return selfIntroName;
+            }
+        }
+
+        // 2. If already assigned a real joinee name, return it
+        if (cachedName != null && !isGenericSpeakerLabel(cachedName)) {
+            return cachedName;
+        }
+
+        // 3. If the provider event itself already carries a real non-generic speaker name (e.g. "Alex (Tech Lead)"), cache and use it
+        if (providerSpeakerName != null && !isGenericSpeakerLabel(providerSpeakerName)) {
+            String cleanProviderName = providerSpeakerName.trim();
+            nameMap.put(speakerKey, cleanProviderName);
+            addJoineeToRoster(meetingId, cleanProviderName);
+            return cleanProviderName;
+        }
+
+        // 4. Match against active speaking joinee detected in the meeting DOM
+        String activeDomSpeaker = activeDomSpeakerByMeeting.get(meetingId);
+        CopyOnWriteArrayList<String> roster = meetingJoineesRoster.get(meetingId);
+        if (activeDomSpeaker != null && !isGenericSpeakerLabel(activeDomSpeaker)) {
+            boolean alreadyUsedByOther = nameMap.entrySet().stream()
+                    .anyMatch(e -> !e.getKey().equals(speakerKey) && activeDomSpeaker.equalsIgnoreCase(e.getValue()));
+            if (!alreadyUsedByOther) {
+                assignAndPersistJoineeToSpeaker(meetingId, speakerKey, activeDomSpeaker);
+                return activeDomSpeaker;
+            }
+        }
+
+        // 5. Match against the meeting joinees roster by speaker index or first unassigned joinee
+        if (roster != null && !roster.isEmpty()) {
+            int speakerIdx = parseSpeakerIndex(speakerKey);
+            String preferred = (speakerIdx >= 1 && speakerIdx <= roster.size())
+                    ? roster.get(speakerIdx - 1)
+                    : null;
+            String assigned = findFirstUnassignedJoinee(roster, nameMap, preferred);
+            if (assigned != null && !isGenericSpeakerLabel(assigned)) {
+                assignAndPersistJoineeToSpeaker(meetingId, speakerKey, assigned);
+                return assigned;
+            }
+        }
+
+        return cachedName != null ? cachedName : (providerSpeakerName != null ? providerSpeakerName : "Speaker 1");
+    }
+
+    private int parseSpeakerIndex(String speakerKey) {
+        if (speakerKey == null) return 1;
+        try {
+            String digits = speakerKey.replaceAll("\\D+", "");
+            if (!digits.isEmpty()) {
+                return Integer.parseInt(digits);
+            }
+        } catch (Exception ignored) {
+        }
+        return 1;
     }
 
     @Override
@@ -94,7 +323,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             frameCounters.put(meetingId, 0L);
             log.info("Audio WebSocket connected for meeting {} [language={}]", meetingId, language);
 
-            // Warm speaker display name cache and transition meeting status asynchronously
+            // Warm speaker display name cache, seed host joinee name, and transition meeting status asynchronously
             CompletableFuture.runAsync(() -> {
                 try {
                     Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
@@ -106,12 +335,24 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
                             meeting.updateStatus(MeetingStatus.RECORDING);
                             meetingRepository.save(meeting);
                         }
+                        try {
+                            if (meeting.getUser() != null && meeting.getUser().getEmail() != null) {
+                                String hostName = deriveDisplayNameFromEmail(meeting.getUser().getEmail());
+                                if (hostName != null) {
+                                    addJoineeToRoster(meetingId, hostName);
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        }
                     }
                     List<Participant> existingParticipants = participantRepository.findByMeetingIdOrderByCreatedAtAsc(meetingId);
                     Map<String, String> nameMap = speakerDisplayNames.computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>());
                     for (Participant p : existingParticipants) {
                         if (p.getSpeakerKey() != null && p.getDisplayName() != null) {
                             nameMap.put(p.getSpeakerKey(), p.getDisplayName());
+                            if (!isGenericSpeakerLabel(p.getDisplayName())) {
+                                addJoineeToRoster(meetingId, p.getDisplayName());
+                            }
                         }
                     }
                 } catch (Exception e) {
@@ -129,10 +370,11 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         if (event == null) return;
 
         String speakerKey = event.speakerKey() != null ? event.speakerKey() : "speaker-1";
-        Map<String, String> nameMap = speakerDisplayNames.computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>());
-        String resolvedSpeakerName = nameMap.getOrDefault(
+        String resolvedSpeakerName = resolveOrAutoAssignJoineeName(
+                meetingId,
                 speakerKey,
-                event.speakerName() != null ? event.speakerName() : "Speaker 1"
+                event.speakerName(),
+                event.text()
         );
         UUID segmentId = event.segmentId() != null ? event.segmentId() : UUID.randomUUID();
 
@@ -152,7 +394,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         // 1. Broadcast immediately to connected dashboard & extension clients (< 1ms delivery latency)
         eventWebSocketHandler.broadcastToMeeting(meetingId, enrichedEvent);
 
-        // 2. Persist finalized segment asynchronously so database network RTT never blocks real-time WebSocket stream
+        // 2. Persist finalized segment asynchronously
         if (enrichedEvent.isFinal()) {
             persistenceExecutor.submit(() -> persistFinalTranscriptSegment(meetingId, enrichedEvent));
         }
@@ -169,7 +411,6 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
                 meetingDirty = true;
             }
 
-            // Auto-name meeting from live discussion if still on default code title
             if (!Boolean.TRUE.equals(meetingTitleResolved.get(meetingId))) {
                 if (MeetingService.isGenericOrCodeOnlyTitle(meeting.getTitle())) {
                     if (event.text() != null && event.text().trim().length() > 14) {
@@ -202,12 +443,17 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
                 meetingRepository.save(meeting);
             }
 
-            // Find or create participant and cache display name
             Participant participant = participantRepository.findByMeetingIdAndSpeakerKey(meetingId, event.speakerKey())
                     .orElseGet(() -> {
                         Participant p = new Participant(UUID.randomUUID(), meeting, event.speakerKey(), event.speakerName());
                         return participantRepository.save(p);
                     });
+
+            // Upgrade participant display name in DB if it was previously generic and is now resolved to a real joinee name
+            if (isGenericSpeakerLabel(participant.getDisplayName()) && !isGenericSpeakerLabel(event.speakerName())) {
+                participant.setDisplayName(event.speakerName());
+                participant = participantRepository.save(participant);
+            }
 
             if (participant.getDisplayName() != null) {
                 speakerDisplayNames
@@ -248,6 +494,16 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             if (lang != null && !lang.isBlank()) {
                 sttProvider.switchLanguage(meetingId, lang);
             }
+        } else if ("SYNC_JOINEES".equals(type)) {
+            Object rawJoinees = map.get("joinees");
+            List<String> joinees = new ArrayList<>();
+            if (rawJoinees instanceof List<?> list) {
+                for (Object item : list) {
+                    if (item != null) joinees.add(item.toString());
+                }
+            }
+            String activeSpeaker = map.get("activeSpeaker") != null ? map.get("activeSpeaker").toString() : null;
+            syncMeetingJoinees(meetingId, joinees, activeSpeaker);
         }
     }
 
@@ -276,6 +532,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         if (meetingId != null) {
             frameCounters.remove(meetingId);
             meetingTitleResolved.remove(meetingId);
+            activeDomSpeakerByMeeting.remove(meetingId);
             log.info("Audio WebSocket closed for meeting {}", meetingId);
             sttProvider.stopSession(meetingId);
         }

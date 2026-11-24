@@ -158,4 +158,55 @@ class RealtimePipelineAndPerformanceTest {
         assertTrue(p95Ms < 5.0, "p95 broadcast latency must be under 5ms (was " + p95Ms + "ms)");
         verify(subscriberSession, times(totalTurns)).sendMessage(any(TextMessage.class));
     }
+
+    @Test
+    void testAutomaticJoineeRosterAndSelfIntroSpeakerAssignment() throws Exception {
+        UUID meetingId = UUID.randomUUID();
+        when(subscriberSession.getUri()).thenReturn(URI.create("ws://localhost:8080/ws/events?meetingId=" + meetingId));
+        when(subscriberSession.isOpen()).thenReturn(true);
+
+        eventWebSocketHandler.afterConnectionEstablished(subscriberSession);
+
+        // 1. Sync meeting joinees detected from Google Meet / Teams / Zoom DOM
+        audioWebSocketHandler.syncMeetingJoinees(
+                meetingId,
+                List.of("Akash Yadav", "Priya Sharma"),
+                "Akash Yadav"
+        );
+
+        // 2. Incoming generic "Speaker 1" and "Speaker 2" turns automatically receive the joinees' real names
+        audioWebSocketHandler.handleTranscriptEvent(meetingId, new TranscriptEvent(
+                "TRANSCRIPT", meetingId, UUID.randomUUID(),
+                "speaker-1", "Speaker 1", "Welcome everyone to the sprint planning call.",
+                1000L, 3000L, true, 0.98
+        ));
+        audioWebSocketHandler.handleTranscriptEvent(meetingId, new TranscriptEvent(
+                "TRANSCRIPT", meetingId, UUID.randomUUID(),
+                "speaker-2", "Speaker 2", "Thanks Akash, the backend services are ready.",
+                3500L, 5500L, true, 0.97
+        ));
+
+        // 3. A third speaker joins and introduces themselves in speech ("Hi team, my name is Rohan Verma")
+        audioWebSocketHandler.handleTranscriptEvent(meetingId, new TranscriptEvent(
+                "TRANSCRIPT", meetingId, UUID.randomUUID(),
+                "speaker-3", "Speaker 3", "Hi team, my name is Rohan Verma and I will lead QA.",
+                6000L, 8500L, true, 0.96
+        ));
+
+        ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
+        verify(subscriberSession, atLeast(5)).sendMessage(captor.capture());
+
+        List<JsonNode> transcriptPayloads = new ArrayList<>();
+        for (TextMessage msg : captor.getAllValues()) {
+            JsonNode node = objectMapper.readTree(msg.getPayload());
+            if ("TRANSCRIPT".equals(node.path("type").asText())) {
+                transcriptPayloads.add(node);
+            }
+        }
+
+        assertEquals(3, transcriptPayloads.size());
+        assertEquals("Akash Yadav", transcriptPayloads.get(0).path("speakerName").asText());
+        assertEquals("Priya Sharma", transcriptPayloads.get(1).path("speakerName").asText());
+        assertEquals("Rohan Verma", transcriptPayloads.get(2).path("speakerName").asText());
+    }
 }

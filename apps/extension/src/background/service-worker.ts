@@ -44,6 +44,58 @@ let activeMeetingId: string | null = null;
 let activeStartTime: number | null = null;
 let liveSegments: LiveSegmentItem[] = [];
 let liveInterimText: string = '';
+let detectedMeetingJoinees: string[] = [];
+let activeSpeakingJoinee: string | null = null;
+
+function isGenericSpeakerLabel(name?: string | null): boolean {
+  if (!name) return true;
+  const trimmed = name.trim();
+  return (
+    trimmed.length === 0 ||
+    /^speaker(?:\s*[-_]?\s*\d+)?$/i.test(trimmed) ||
+    /^participant(?:\s*\d+)?$/i.test(trimmed)
+  );
+}
+
+function resolveJoineeForSpeakerKey(speakerKey: string, currentName?: string | null): string {
+  if (currentName && !isGenericSpeakerLabel(currentName)) {
+    return currentName.trim();
+  }
+  if (activeSpeakingJoinee && !isGenericSpeakerLabel(activeSpeakingJoinee)) {
+    const usedByOther = liveSegments.some(
+      (s) => s.speakerKey !== speakerKey && s.speakerName.toLowerCase() === activeSpeakingJoinee!.toLowerCase()
+    );
+    if (!usedByOther) {
+      return activeSpeakingJoinee;
+    }
+  }
+  if (detectedMeetingJoinees.length > 0) {
+    const numMatch = (speakerKey || 'speaker-1').match(/(\d+)/);
+    const idx = numMatch ? Math.max(0, parseInt(numMatch[1], 10) - 1) : 0;
+    if (idx < detectedMeetingJoinees.length) {
+      return detectedMeetingJoinees[idx];
+    }
+    return detectedMeetingJoinees[0];
+  }
+  return currentName || 'Speaker 1';
+}
+
+async function pushJoineesToBackend(meetingId: string | null, joinees: string[], activeSpeaker: string | null) {
+  if (!meetingId || (joinees.length === 0 && !activeSpeaker)) return;
+  try {
+    const token = await getBackendAuthToken();
+    if (!token) return;
+    const { apiBase } = await resolveExtensionEndpoints();
+    await fetch(`${apiBase}/meetings/${meetingId}/joinees`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ joinees, activeSpeaker })
+    });
+  } catch {}
+}
 
 // Initialize state from persistent storage and auto-inject into open meeting & dashboard tabs
 chrome.storage.local.get(
@@ -359,6 +411,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   }
 
+  if (message.type === 'MEETING_JOINEES_DETECTED') {
+    if (Array.isArray(message.joinees) && message.joinees.length > 0) {
+      detectedMeetingJoinees = message.joinees;
+    }
+    if (typeof message.activeSpeaker === 'string' && message.activeSpeaker.trim()) {
+      activeSpeakingJoinee = message.activeSpeaker.trim();
+    }
+    // Upgrade any generic speaker labels in liveSegments to real joinee names
+    let upgraded = false;
+    liveSegments = liveSegments.map((s) => {
+      if (isGenericSpeakerLabel(s.speakerName)) {
+        const resolved = resolveJoineeForSpeakerKey(s.speakerKey, s.speakerName);
+        if (resolved !== s.speakerName) {
+          upgraded = true;
+          return { ...s, speakerName: resolved };
+        }
+      }
+      return s;
+    });
+    if (upgraded) {
+      chrome.storage.local.set({ liveSegments });
+      broadcastToMeetingTab();
+    }
+    const targetMeetingId = message.meetingId || activeMeetingId;
+    if (targetMeetingId) {
+      pushJoineesToBackend(targetMeetingId, detectedMeetingJoinees, activeSpeakingJoinee);
+    }
+    sendResponse({ success: true, joinees: detectedMeetingJoinees });
+    return true;
+  }
+
   if (message.type === 'LIVE_TRANSCRIPT_EVENT') {
     if (isPaused) {
       sendResponse({ success: true });
@@ -376,13 +459,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } else if (ev.type === 'TRANSCRIPT' && ev.text) {
         liveInterimText = '';
         const segId = ev.segmentId || 'seg-' + Date.now();
+        const speakerKey = ev.speakerKey || 'speaker-1';
+        const resolvedSpeakerName = resolveJoineeForSpeakerKey(speakerKey, ev.speakerName);
         if (!liveSegments.some((s) => s.id === segId)) {
           liveSegments = [
             ...liveSegments.slice(-49),
             {
               id: segId,
-              speakerKey: ev.speakerKey || 'speaker-1',
-              speakerName: ev.speakerName || 'Speaker 1',
+              speakerKey,
+              speakerName: resolvedSpeakerName,
               text: ev.text,
               startMs: ev.startMs || 0
             }
@@ -696,6 +781,9 @@ async function handleStartCapture(
 
   const now = Date.now();
   await saveState('RECORDING', platform, tabId, meetingId, now, false);
+  if (detectedMeetingJoinees.length > 0 || activeSpeakingJoinee) {
+    pushJoineesToBackend(meetingId, detectedMeetingJoinees, activeSpeakingJoinee);
+  }
   return { streamId, meetingId, offscreenResponse };
 }
 

@@ -188,6 +188,186 @@
   let targetTranslation = 'ORIGINAL';
   const translationsCache: Record<string, string> = {};
   const pendingTranslations = new Set<string>();
+  let detectedJoinees: string[] = [];
+  let activeSpeakingJoinee: string | null = null;
+  let lastJoineeSyncSignature = '';
+
+  const IGNORED_UI_LABELS = new Set([
+    'you',
+    'me',
+    'host',
+    'guest',
+    'organizer',
+    'presenter',
+    'presentation',
+    'mute',
+    'unmute',
+    'pin',
+    'unpin',
+    'more options',
+    'more actions',
+    'remove',
+    'admit',
+    'raise hand',
+    'lower hand',
+    'captions',
+    'turn on captions',
+    'turn off captions',
+    'chat',
+    'people',
+    'participants',
+    'activities',
+    'host controls',
+    'share screen',
+    'present now',
+    'leave call',
+    'end call',
+    'vinxa live',
+    'ready',
+    'live',
+    'paused',
+    'sign in',
+    'copy',
+    'expand',
+    'audio',
+    'video',
+    'settings',
+    'reactions',
+    'details',
+    'meeting details'
+  ]);
+
+  function cleanCandidateJoineeName(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    let s = raw
+      .replace(/\s*\((?:You|Host|Organizer|Guest|Presenter|Presentation|Co-host|Muted)\)\s*/gi, ' ')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (s.length < 2 || s.length > 42) return null;
+    const lower = s.toLowerCase();
+    if (IGNORED_UI_LABELS.has(lower)) return null;
+    if (/^(?:speaker\s*\d*|participant\s*\d*|user\s*\d*)$/i.test(s)) return null;
+    if (/^\d+[:.]\d+$/.test(s) || /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/i.test(s)) return null;
+    if (
+      lower.includes('microphone') ||
+      lower.includes('camera') ||
+      lower.includes('turn off') ||
+      lower.includes('turn on') ||
+      lower.includes('more options') ||
+      lower.includes('vinxa') ||
+      lower.includes('http://') ||
+      lower.includes('https://')
+    ) {
+      return null;
+    }
+    if (!/[a-zA-Z\u00C0-\u024F\u0900-\u097F]/.test(s)) return null;
+    return s;
+  }
+
+  function scanMeetingJoineesFromDom() {
+    const foundNames: string[] = [];
+    const seenLower = new Set<string>();
+    let currentActiveSpeaker: string | null = null;
+
+    const addCandidate = (raw: string | null | undefined, isSpeaking = false) => {
+      const cleaned = cleanCandidateJoineeName(raw);
+      if (!cleaned) return;
+      const key = cleaned.toLowerCase();
+      if (!seenLower.has(key)) {
+        seenLower.add(key);
+        foundNames.push(cleaned);
+      }
+      if (isSpeaking && !currentActiveSpeaker) {
+        currentActiveSpeaker = cleaned;
+      }
+    };
+
+    try {
+      // 1. Google Meet Participant Tiles & Roster Selectors
+      const meetTiles = document.querySelectorAll<HTMLElement>('[data-participant-id], [data-self-name]');
+      meetTiles.forEach((tile) => {
+        if (tile.id === 'vinxa-live-hud-host') return;
+        const selfName = tile.getAttribute('data-self-name');
+        if (selfName) addCandidate(selfName);
+
+        const nameEl = tile.querySelector<HTMLElement>('.zWGUib, .cS7aqe, .dwSJ2e, .N2K3jd');
+        const speakingIndicator = tile.querySelector<HTMLElement>('.gjg47c, .IisKdb, .S7urwe');
+        const isTileSpeaking = Boolean(
+          speakingIndicator &&
+            speakingIndicator.offsetParent !== null &&
+            window.getComputedStyle(speakingIndicator).display !== 'none'
+        );
+        if (nameEl?.textContent) {
+          addCandidate(nameEl.textContent, isTileSpeaking);
+        }
+      });
+
+      const meetNameBadges = document.querySelectorAll<HTMLElement>(
+        '.zWGUib, .VfPpkd-StrnGf-rymPhb-b9t22c, .cS7aqe'
+      );
+      meetNameBadges.forEach((el) => addCandidate(el.textContent));
+
+      // 2. Microsoft Teams Web Participant Tiles & Roster Selectors
+      const teamsEls = document.querySelectorAll<HTMLElement>(
+        '[data-tid="ts-roster-item-title"], [data-tid="calling-participant-stream"] [dir="auto"], [data-cid="calling-participant-stream"] [dir="auto"], .ui-chat__message__author'
+      );
+      teamsEls.forEach((el) => addCandidate(el.textContent));
+
+      // 3. Zoom Web Client Participant Tiles & Roster Selectors
+      const zoomActive = document.querySelector<HTMLElement>(
+        '.speaker-active-container .video-avatar__avatar-name, .active-speaker .video-avatar__avatar-name'
+      );
+      if (zoomActive?.textContent) {
+        addCandidate(zoomActive.textContent, true);
+      }
+      const zoomEls = document.querySelectorAll<HTMLElement>(
+        '.video-avatar__avatar-name, .participants-item__display-name'
+      );
+      zoomEls.forEach((el) => addCandidate(el.textContent));
+    } catch {
+      // Ignore transient DOM query errors
+    }
+
+    if (foundNames.length > 0) {
+      detectedJoinees = foundNames;
+    }
+    if (currentActiveSpeaker) {
+      activeSpeakingJoinee = currentActiveSpeaker;
+    }
+
+    const sig = `${activeMeetingId || ''}|${detectedJoinees.join(',')}|${activeSpeakingJoinee || ''}`;
+    if (detectedJoinees.length > 0 && sig !== lastJoineeSyncSignature) {
+      lastJoineeSyncSignature = sig;
+      chrome.runtime
+        .sendMessage({
+          type: 'MEETING_JOINEES_DETECTED',
+          meetingId: activeMeetingId,
+          joinees: detectedJoinees,
+          activeSpeaker: activeSpeakingJoinee
+        })
+        .catch(() => {});
+    }
+  }
+
+  function resolveHudSpeakerDisplayName(seg: Segment): string {
+    const rawName = (seg.speakerName || '').trim();
+    const isGeneric =
+      !rawName ||
+      /^speaker(?:\s*[-_]?\s*\d+)?$/i.test(rawName) ||
+      /^participant(?:\s*\d+)?$/i.test(rawName);
+    if (!isGeneric) return rawName;
+
+    if (detectedJoinees.length > 0) {
+      const numMatch = (seg.speakerKey || 'speaker-1').match(/(\d+)/);
+      const idx = numMatch ? Math.max(0, parseInt(numMatch[1], 10) - 1) : 0;
+      if (idx < detectedJoinees.length) {
+        return detectedJoinees[idx];
+      }
+      return detectedJoinees[0];
+    }
+    return rawName || 'Speaker 1';
+  }
 
   const host = document.createElement('div');
   host.id = 'vinxa-live-hud-host';
@@ -1000,7 +1180,7 @@
 
         const spk = document.createElement('span');
         spk.className = 'turn-speaker';
-        spk.textContent = seg.speakerName || 'Speaker 1';
+        spk.textContent = resolveHudSpeakerDisplayName(seg);
 
         const tm = document.createElement('span');
         tm.className = 'turn-time';
@@ -1021,7 +1201,7 @@
       } else {
         // Update speaker name or text in-place only if changed
         const spk = item.querySelector('.turn-speaker');
-        const nextSpeaker = seg.speakerName || 'Speaker 1';
+        const nextSpeaker = resolveHudSpeakerDisplayName(seg);
         if (spk && spk.textContent !== nextSpeaker) spk.textContent = nextSpeaker;
         const txt = item.querySelector('.turn-text');
         if (txt && txt.textContent !== seg.text) txt.textContent = seg.text;
@@ -1123,6 +1303,7 @@
   }
 
   const timerInterval = setInterval(() => {
+    scanMeetingJoineesFromDom();
     if (isRecording && !isPaused && startTime) {
       const totalSec = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
       const m = Math.floor(totalSec / 60)
@@ -1132,6 +1313,7 @@
       timerSpan.textContent = `${m}:${s}`;
     }
   }, 1000);
+  setTimeout(scanMeetingJoineesFromDom, 500);
 
   window.addEventListener(
     'vinxa-hud-cleanup',
