@@ -3,6 +3,7 @@ package com.vinxa.live.realtime;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vinxa.live.meeting.Meeting;
 import com.vinxa.live.meeting.MeetingRepository;
+import com.vinxa.live.meeting.MeetingService;
 import com.vinxa.live.meeting.MeetingStatus;
 import com.vinxa.live.participant.Participant;
 import com.vinxa.live.participant.ParticipantRepository;
@@ -10,6 +11,7 @@ import com.vinxa.live.stt.SpeechToTextProvider;
 import com.vinxa.live.stt.TranscriptEvent;
 import com.vinxa.live.transcript.TranscriptSegment;
 import com.vinxa.live.transcript.TranscriptSegmentRepository;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -20,9 +22,10 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 
 @Component
 public class AudioWebSocketHandler extends AbstractWebSocketHandler {
@@ -38,6 +41,9 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
 
     private final Map<String, UUID> sessionToMeetingMap = new ConcurrentHashMap<>();
     private final Map<UUID, Long> frameCounters = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<String, String>> speakerDisplayNames = new ConcurrentHashMap<>();
+    private final Map<UUID, Boolean> meetingTitleResolved = new ConcurrentHashMap<>();
+    private final ExecutorService persistenceExecutor;
 
     public AudioWebSocketHandler(
             SpeechToTextProvider sttProvider,
@@ -51,6 +57,32 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         this.meetingRepository = meetingRepository;
         this.participantRepository = participantRepository;
         this.transcriptSegmentRepository = transcriptSegmentRepository;
+        this.persistenceExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "transcript-db-writer");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        persistenceExecutor.shutdown();
+    }
+
+    public void registerSpeakerDisplayName(UUID meetingId, String speakerKey, String displayName) {
+        if (meetingId == null || speakerKey == null || displayName == null || displayName.isBlank()) return;
+        speakerDisplayNames
+                .computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>())
+                .put(speakerKey, displayName.trim());
+        eventWebSocketHandler.broadcastToMeeting(
+                meetingId,
+                Map.of(
+                        "type", "SPEAKER_RENAMED",
+                        "meetingId", meetingId.toString(),
+                        "speakerKey", speakerKey,
+                        "speakerName", displayName.trim()
+                )
+        );
     }
 
     @Override
@@ -62,11 +94,30 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             frameCounters.put(meetingId, 0L);
             log.info("Audio WebSocket connected for meeting {} [language={}]", meetingId, language);
 
-            Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
-            if (meeting != null && meeting.getStatus().canTransitionTo(MeetingStatus.RECORDING)) {
-                meeting.updateStatus(MeetingStatus.RECORDING);
-                meetingRepository.save(meeting);
-            }
+            // Warm speaker display name cache and transition meeting status asynchronously
+            CompletableFuture.runAsync(() -> {
+                try {
+                    Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
+                    if (meeting != null) {
+                        if (!MeetingService.isGenericOrCodeOnlyTitle(meeting.getTitle())) {
+                            meetingTitleResolved.put(meetingId, true);
+                        }
+                        if (meeting.getStatus().canTransitionTo(MeetingStatus.RECORDING)) {
+                            meeting.updateStatus(MeetingStatus.RECORDING);
+                            meetingRepository.save(meeting);
+                        }
+                    }
+                    List<Participant> existingParticipants = participantRepository.findByMeetingIdOrderByCreatedAtAsc(meetingId);
+                    Map<String, String> nameMap = speakerDisplayNames.computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>());
+                    for (Participant p : existingParticipants) {
+                        if (p.getSpeakerKey() != null && p.getDisplayName() != null) {
+                            nameMap.put(p.getSpeakerKey(), p.getDisplayName());
+                        }
+                    }
+                } catch (Exception e) {
+                    log.debug("Initial meeting status warm-up error: {}", e.getMessage());
+                }
+            }, persistenceExecutor);
 
             sttProvider.startSession(meetingId, language, (TranscriptEvent event) -> {
                 handleTranscriptEvent(meetingId, event);
@@ -74,19 +125,55 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         }
     }
 
-    private void handleTranscriptEvent(UUID meetingId, TranscriptEvent event) {
-        try {
-            if (event.isFinal()) {
-                Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
-                if (meeting != null) {
-                    if (meeting.getStatus() != MeetingStatus.RECORDING && meeting.getStatus().canTransitionTo(MeetingStatus.RECORDING)) {
-                        meeting.updateStatus(MeetingStatus.RECORDING);
-                    }
+    public void handleTranscriptEvent(UUID meetingId, TranscriptEvent event) {
+        if (event == null) return;
 
-                    // Auto-name meeting from live discussion if still on default code title
-                    if (com.vinxa.live.meeting.MeetingService.isGenericOrCodeOnlyTitle(meeting.getTitle())
-                            && event.text() != null && event.text().trim().length() > 14) {
-                        String code = com.vinxa.live.meeting.MeetingService.extractMeetingCode(
+        String speakerKey = event.speakerKey() != null ? event.speakerKey() : "speaker-1";
+        Map<String, String> nameMap = speakerDisplayNames.computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>());
+        String resolvedSpeakerName = nameMap.getOrDefault(
+                speakerKey,
+                event.speakerName() != null ? event.speakerName() : "Speaker 1"
+        );
+        UUID segmentId = event.segmentId() != null ? event.segmentId() : UUID.randomUUID();
+
+        TranscriptEvent enrichedEvent = new TranscriptEvent(
+                event.type(),
+                meetingId,
+                segmentId,
+                speakerKey,
+                resolvedSpeakerName,
+                event.text(),
+                event.startMs(),
+                event.endMs(),
+                event.isFinal(),
+                event.confidence()
+        );
+
+        // 1. Broadcast immediately to connected dashboard & extension clients (< 1ms delivery latency)
+        eventWebSocketHandler.broadcastToMeeting(meetingId, enrichedEvent);
+
+        // 2. Persist finalized segment asynchronously so database network RTT never blocks real-time WebSocket stream
+        if (enrichedEvent.isFinal()) {
+            persistenceExecutor.submit(() -> persistFinalTranscriptSegment(meetingId, enrichedEvent));
+        }
+    }
+
+    void persistFinalTranscriptSegment(UUID meetingId, TranscriptEvent event) {
+        try {
+            Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
+            if (meeting == null) return;
+
+            boolean meetingDirty = false;
+            if (meeting.getStatus() != MeetingStatus.RECORDING && meeting.getStatus().canTransitionTo(MeetingStatus.RECORDING)) {
+                meeting.updateStatus(MeetingStatus.RECORDING);
+                meetingDirty = true;
+            }
+
+            // Auto-name meeting from live discussion if still on default code title
+            if (!Boolean.TRUE.equals(meetingTitleResolved.get(meetingId))) {
+                if (MeetingService.isGenericOrCodeOnlyTitle(meeting.getTitle())) {
+                    if (event.text() != null && event.text().trim().length() > 14) {
+                        String code = MeetingService.extractMeetingCode(
                                 meeting.getTitle(),
                                 meeting.getMeetingUrl(),
                                 meeting.getId()
@@ -102,38 +189,47 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
                                 cleanTopic = (sp > 14 ? cleanTopic.substring(0, sp) : cleanTopic.substring(0, 40)) + "…";
                             }
                             meeting.setTitle(cleanTopic + " • " + code);
+                            meetingDirty = true;
+                            meetingTitleResolved.put(meetingId, true);
                         }
                     }
-                    meetingRepository.save(meeting);
-
-                    // Find or create participant
-                    Participant participant = participantRepository.findByMeetingIdAndSpeakerKey(meetingId, event.speakerKey())
-                            .orElseGet(() -> {
-                                Participant p = new Participant(UUID.randomUUID(), meeting, event.speakerKey(), event.speakerName());
-                                return participantRepository.save(p);
-                            });
-
-                    // Save segment to Neon PostgreSQL
-                    TranscriptSegment segment = new TranscriptSegment(
-                            event.segmentId() != null ? event.segmentId() : UUID.randomUUID(),
-                            meeting,
-                            participant,
-                            event.segmentId() != null ? event.segmentId().toString() : UUID.randomUUID().toString(),
-                            event.text(),
-                            event.startMs(),
-                            event.endMs(),
-                            (float) event.confidence(),
-                            true
-                    );
-                    transcriptSegmentRepository.save(segment);
+                } else {
+                    meetingTitleResolved.put(meetingId, true);
                 }
             }
-        } catch (Exception e) {
-            log.warn("Failed saving transcript segment to DB: {}", e.getMessage());
-        }
 
-        // Broadcast event in real time to connected dashboard clients
-        eventWebSocketHandler.broadcastToMeeting(meetingId, event);
+            if (meetingDirty) {
+                meetingRepository.save(meeting);
+            }
+
+            // Find or create participant and cache display name
+            Participant participant = participantRepository.findByMeetingIdAndSpeakerKey(meetingId, event.speakerKey())
+                    .orElseGet(() -> {
+                        Participant p = new Participant(UUID.randomUUID(), meeting, event.speakerKey(), event.speakerName());
+                        return participantRepository.save(p);
+                    });
+
+            if (participant.getDisplayName() != null) {
+                speakerDisplayNames
+                        .computeIfAbsent(meetingId, k -> new ConcurrentHashMap<>())
+                        .put(event.speakerKey(), participant.getDisplayName());
+            }
+
+            TranscriptSegment segment = new TranscriptSegment(
+                    event.segmentId(),
+                    meeting,
+                    participant,
+                    event.segmentId().toString(),
+                    event.text(),
+                    event.startMs(),
+                    event.endMs(),
+                    (float) event.confidence(),
+                    true
+            );
+            transcriptSegmentRepository.save(segment);
+        } catch (Exception e) {
+            log.warn("Failed saving transcript segment to DB for meeting {}: {}", meetingId, e.getMessage());
+        }
     }
 
     @Override
@@ -166,8 +262,8 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
 
         frameCounters.compute(meetingId, (k, v) -> {
             long total = (v == null ? 0L : v) + payload.length;
-            if (total % 160000 < payload.length) {
-                log.info("Received audio stream: total {} bytes for meeting {}", total, meetingId);
+            if (total % 320000 < payload.length) {
+                log.debug("Received audio stream: total {} bytes for meeting {}", total, meetingId);
             }
             return total;
         });
@@ -178,6 +274,8 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         UUID meetingId = sessionToMeetingMap.remove(session.getId());
         if (meetingId != null) {
+            frameCounters.remove(meetingId);
+            meetingTitleResolved.remove(meetingId);
             log.info("Audio WebSocket closed for meeting {}", meetingId);
             sttProvider.stopSession(meetingId);
         }

@@ -214,14 +214,54 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
     setReanalyzing(true);
     try {
       await api.reanalyzeMeeting(meeting.id);
-      setTimeout(async () => {
-        await loadData();
-        setReanalyzing(false);
-      }, 2800);
-    } catch {
+      // Poll until analysis finishes (status transitions to ANALYSIS_COMPLETED or ERROR)
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise((r) => setTimeout(r, 1200));
+        try {
+          const updatedMeeting = await api.getMeeting(meeting.id);
+          if (
+            updatedMeeting.status === 'ANALYSIS_COMPLETED' ||
+            updatedMeeting.status === 'ERROR'
+          ) {
+            setDraftTitle(updatedMeeting.title);
+            break;
+          }
+        } catch {}
+      }
+      await loadData();
+      window.dispatchEvent(new CustomEvent('vinxa-meeting-status-updated'));
+    } finally {
       setReanalyzing(false);
     }
   };
+
+  useEffect(() => {
+    if (
+      meeting.status !== 'ANALYSIS_PENDING' &&
+      meeting.status !== 'FINALIZING' &&
+      meeting.status !== 'STOPPING'
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const pollPending = setInterval(async () => {
+      try {
+        const updatedMeeting = await api.getMeeting(meeting.id);
+        if (
+          !cancelled &&
+          (updatedMeeting.status === 'ANALYSIS_COMPLETED' || updatedMeeting.status === 'ERROR')
+        ) {
+          clearInterval(pollPending);
+          await loadData();
+          window.dispatchEvent(new CustomEvent('vinxa-meeting-status-updated'));
+        }
+      } catch {}
+    }, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(pollPending);
+    };
+  }, [meeting.id, meeting.status]);
 
   const handleCopyTranscript = () => {
     if (transcript.length === 0) return;

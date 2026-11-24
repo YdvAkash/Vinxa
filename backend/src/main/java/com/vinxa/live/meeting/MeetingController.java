@@ -90,4 +90,10 @@ public class MeetingController {
         User user = SecurityUtils.getCurrentUser();
         return ResponseEntity.ok(meetingService.disablePublicShare(user, id));
     }
+
+    @GetMapping("/actions/all")
+    public ResponseEntity<java.util.List<com.vinxa.live.transcript.TranscriptController.ActionItemDto>> listAllActionItems() {
+        User user = SecurityUtils.getCurrentUser();
+        return ResponseEntity.ok(meetingService.listAllUserActionItems(user));
+    }
 }

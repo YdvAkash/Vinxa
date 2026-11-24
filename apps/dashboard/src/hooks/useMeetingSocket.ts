@@ -2,6 +2,20 @@ import { useEffect, useState, useRef } from 'react';
 import { TranscriptSegment } from '../types';
 import { api } from '../services/api';
 
+function areSegmentsEqual(a: TranscriptSegment[], b: TranscriptSegment[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].id !== b[i].id ||
+      a[i].speakerName !== b[i].speakerName ||
+      a[i].text !== b[i].text
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function useMeetingSocket(meetingId: string | null) {
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [interimText, setInterimText] = useState<string>('');
@@ -19,8 +33,9 @@ export function useMeetingSocket(meetingId: string | null) {
     let isMounted = true;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // 1. Fetch existing segments from DB and poll every 1.5s for guaranteed live consistency
+    // 1. Fetch existing segments from DB and reconcile without redundant React re-renders
     const syncSegmentsFromDb = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const dbSegments = await api.getTranscript(meetingId);
         if (!isMounted || !Array.isArray(dbSegments)) return;
@@ -30,7 +45,10 @@ export function useMeetingSocket(meetingId: string | null) {
           const byId = new Map<string, TranscriptSegment>();
           for (const s of prev) byId.set(s.id, s);
           for (const s of dbSegments) byId.set(s.id, s);
-          return Array.from(byId.values()).sort((a, b) => (a.startMs || 0) - (b.startMs || 0));
+          const merged = Array.from(byId.values()).sort(
+            (a, b) => (a.startMs || 0) - (b.startMs || 0)
+          );
+          return areSegmentsEqual(prev, merged) ? prev : merged;
         });
       } catch {
         // Ignore transient poll errors
@@ -38,7 +56,7 @@ export function useMeetingSocket(meetingId: string | null) {
     };
 
     syncSegmentsFromDb();
-    const pollInterval = setInterval(syncSegmentsFromDb, 1500);
+    const pollInterval = setInterval(syncSegmentsFromDb, 4000);
 
     // 2. Connect real-time Event WebSocket for sub-second interim + final push
     const connectWebSocket = () => {
@@ -53,7 +71,10 @@ export function useMeetingSocket(meetingId: string | null) {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (isMounted) setConnected(true);
+        if (isMounted) {
+          setConnected(true);
+          syncSegmentsFromDb();
+        }
       };
 
       ws.onmessage = (event) => {
@@ -80,6 +101,16 @@ export function useMeetingSocket(meetingId: string | null) {
               if (prev.some((s) => s.id === newSeg.id)) return prev;
               return [...prev, newSeg];
             });
+          } else if (data.type === 'SPEAKER_RENAMED' && data.speakerKey && data.speakerName) {
+            setSegments((prev) =>
+              prev.map((s) =>
+                s.speakerKey === data.speakerKey ? { ...s, speakerName: data.speakerName } : s
+              )
+            );
+          } else if (data.type === 'MEETING_STATUS') {
+            window.dispatchEvent(
+              new CustomEvent('vinxa-meeting-status-updated', { detail: data })
+            );
           }
         } catch (e) {
           console.error('Socket parse error:', e);
@@ -89,7 +120,7 @@ export function useMeetingSocket(meetingId: string | null) {
       ws.onclose = () => {
         if (!isMounted) return;
         setConnected(false);
-        reconnectTimer = setTimeout(connectWebSocket, 2000);
+        reconnectTimer = setTimeout(connectWebSocket, 1500);
       };
 
       ws.onerror = () => {

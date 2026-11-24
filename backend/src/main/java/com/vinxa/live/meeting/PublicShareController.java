@@ -39,6 +39,7 @@ public class PublicShareController {
     }
 
     @GetMapping("/{shareToken}")
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public ResponseEntity<Map<String, Object>> getPublicSharedMeeting(@PathVariable("shareToken") String shareToken) {
         Meeting meeting = meetingRepository.findByShareTokenAndPublicSharedTrueAndDeletedAtIsNull(shareToken)
                 .orElseThrow(() -> new IllegalArgumentException("Shared meeting link is invalid or has been disabled by the owner."));

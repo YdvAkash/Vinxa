@@ -941,9 +941,8 @@
   }
 
   function renderFeed() {
-    clearChildren(feedBox);
-
     if (segments.length === 0 && !interimText) {
+      clearChildren(feedBox);
       const empty = document.createElement('div');
       empty.className = 'empty-state';
       empty.appendChild(createWaveIndicator());
@@ -966,45 +965,102 @@
       return;
     }
 
+    // Remove empty-state placeholder if present
+    const emptyEl = feedBox.querySelector('.empty-state');
+    if (emptyEl) emptyEl.remove();
+
     const sliceCount = dockMode === 'side' ? -25 : -12;
-    segments.slice(sliceCount).forEach((seg) => {
-      const item = document.createElement('div');
-      item.className = `turn-item ${getSpeakerColorClass(seg.speakerKey || 'speaker-1')}`;
+    const visibleSegments = segments.slice(sliceCount);
+    const visibleIds = new Set(visibleSegments.map((s) => s.id));
 
-      const turnHeader = document.createElement('div');
-      turnHeader.className = 'turn-header';
+    // Remove turn items that scrolled out of the visible window
+    const existingTurns = Array.from(feedBox.querySelectorAll<HTMLElement>('.turn-item'));
+    const existingById = new Map<string, HTMLElement>();
+    for (const el of existingTurns) {
+      const id = el.getAttribute('data-seg-id') || '';
+      if (!id || !visibleIds.has(id)) {
+        el.remove();
+      } else {
+        existingById.set(id, el);
+      }
+    }
 
-      const spk = document.createElement('span');
-      spk.className = 'turn-speaker';
-      spk.textContent = seg.speakerName || 'Speaker 1';
+    const interimNode = feedBox.querySelector<HTMLElement>('.interim-box');
 
-      const tm = document.createElement('span');
-      tm.className = 'turn-time';
-      tm.textContent = formatTime(seg.startMs);
+    visibleSegments.forEach((seg) => {
+      const colorClass = getSpeakerColorClass(seg.speakerKey || 'speaker-1');
+      let item = existingById.get(seg.id);
+      if (!item) {
+        item = document.createElement('div');
+        item.setAttribute('data-seg-id', seg.id);
+        item.className = `turn-item ${colorClass}`;
 
-      turnHeader.append(spk, tm);
+        const turnHeader = document.createElement('div');
+        turnHeader.className = 'turn-header';
 
-      const txt = document.createElement('div');
-      txt.className = 'turn-text';
-      txt.textContent = seg.text;
+        const spk = document.createElement('span');
+        spk.className = 'turn-speaker';
+        spk.textContent = seg.speakerName || 'Speaker 1';
 
-      item.append(turnHeader, txt);
+        const tm = document.createElement('span');
+        tm.className = 'turn-time';
+        tm.textContent = formatTime(seg.startMs);
 
-      if (targetTranslation !== 'ORIGINAL' && translationsCache[seg.id]) {
-        const trans = document.createElement('div');
-        trans.className = 'turn-trans';
-        trans.textContent = `🌐 ${translationsCache[seg.id]}`;
-        item.appendChild(trans);
+        turnHeader.append(spk, tm);
+
+        const txt = document.createElement('div');
+        txt.className = 'turn-text';
+        txt.textContent = seg.text;
+
+        item.append(turnHeader, txt);
+        if (interimNode) {
+          feedBox.insertBefore(item, interimNode);
+        } else {
+          feedBox.appendChild(item);
+        }
+      } else {
+        // Update speaker name or text in-place only if changed
+        const spk = item.querySelector('.turn-speaker');
+        const nextSpeaker = seg.speakerName || 'Speaker 1';
+        if (spk && spk.textContent !== nextSpeaker) spk.textContent = nextSpeaker;
+        const txt = item.querySelector('.turn-text');
+        if (txt && txt.textContent !== seg.text) txt.textContent = seg.text;
       }
 
-      feedBox.appendChild(item);
+      // Reconcile translation line
+      let trans = item.querySelector<HTMLElement>('.turn-trans');
+      if (targetTranslation !== 'ORIGINAL' && translationsCache[seg.id]) {
+        const expectedTrans = `🌐 ${translationsCache[seg.id]}`;
+        if (!trans) {
+          trans = document.createElement('div');
+          trans.className = 'turn-trans';
+          trans.textContent = expectedTrans;
+          item.appendChild(trans);
+        } else if (trans.textContent !== expectedTrans) {
+          trans.textContent = expectedTrans;
+        }
+      } else if (trans) {
+        trans.remove();
+      }
     });
 
     if (interimText && !isPaused) {
-      const interim = document.createElement('div');
-      interim.className = 'interim-box';
-      interim.textContent = `🎙️ ${interimText}`;
-      feedBox.appendChild(interim);
+      const expectedInterim = `🎙️ ${interimText}`;
+      if (!interimNode) {
+        const interim = document.createElement('div');
+        interim.className = 'interim-box';
+        interim.textContent = expectedInterim;
+        feedBox.appendChild(interim);
+      } else {
+        if (interimNode.textContent !== expectedInterim) {
+          interimNode.textContent = expectedInterim;
+        }
+        if (feedBox.lastElementChild !== interimNode) {
+          feedBox.appendChild(interimNode);
+        }
+      }
+    } else if (interimNode) {
+      interimNode.remove();
     }
 
     if (!userScrolledUp) {

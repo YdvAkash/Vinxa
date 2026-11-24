@@ -35,7 +35,7 @@ const SPEAKER_STYLES: Record<string, { badge: string; text: string; border: stri
   }
 };
 
-export const TranscriptFeed: React.FC<TranscriptFeedProps> = ({
+export const TranscriptFeed: React.FC<TranscriptFeedProps> = React.memo(({
   segments,
   interimText,
   translations = {},
@@ -229,4 +229,4 @@ export const TranscriptFeed: React.FC<TranscriptFeedProps> = ({
       )}
     </div>
   );
-};
+});

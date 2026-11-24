@@ -40,6 +40,7 @@ export interface Decision {
 
 export interface ActionItem {
   id: string;
+  meetingId?: string;
   task: string;
   title?: string;
   assignee: string | null;

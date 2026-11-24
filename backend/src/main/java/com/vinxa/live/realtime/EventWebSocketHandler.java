@@ -61,6 +61,9 @@ public class EventWebSocketHandler extends TextWebSocketHandler {
             Set<WebSocketSession> sessions = meetingSubscribers.get(meetingId);
             if (sessions != null) {
                 sessions.remove(session);
+                if (sessions.isEmpty()) {
+                    meetingSubscribers.remove(meetingId, sessions);
+                }
             }
         }
     }

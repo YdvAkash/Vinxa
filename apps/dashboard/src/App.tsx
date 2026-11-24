@@ -71,23 +71,52 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('vinxa-session-expired', handleExpired);
   }, []);
 
-  const fetchMeetings = async () => {
+  const computeMeetingsSignature = (list: Meeting[]) =>
+    list
+      .map(
+        (m) =>
+          `${m.id}:${m.status}:${m.title}:${m.segmentCount ?? 0}:${m.actionItemCount ?? 0}:${m.decisionCount ?? 0}:${m.participantCount ?? 0}:${m.publicShared ? 1 : 0}:${m.shareToken ?? ''}`
+      )
+      .join('|');
+
+  const fetchMeetings = async (force = false) => {
     if (!api.getStoredUser() && !localStorage.getItem('vinxa_token')) {
       setLoading(false);
       return;
     }
+    if (!force && typeof document !== 'undefined' && document.hidden) {
+      return;
+    }
     try {
       const data = await api.getMeetings();
-      setMeetings(data);
+      setMeetings((prev) => {
+        if (!force && computeMeetingsSignature(prev) === computeMeetingsSignature(data)) {
+          return prev;
+        }
+        return data;
+      });
       if (data.length > 0) {
         setSelectedMeeting((prev) => {
           if (!prev) return data[0];
-          return data.find((m) => m.id === prev.id) || data[0];
+          const updated = data.find((m) => m.id === prev.id);
+          if (!updated) return data[0];
+          if (
+            updated.status === prev.status &&
+            updated.title === prev.title &&
+            updated.segmentCount === prev.segmentCount &&
+            updated.actionItemCount === prev.actionItemCount &&
+            updated.decisionCount === prev.decisionCount &&
+            updated.publicShared === prev.publicShared &&
+            updated.shareToken === prev.shareToken
+          ) {
+            return prev;
+          }
+          return updated;
         });
       }
       const activeRec = data.find((m) => m.status === 'RECORDING');
       if (activeRec) {
-        setLiveSelectedMeetingId(activeRec.id);
+        setLiveSelectedMeetingId((prevId) => (prevId === activeRec.id ? prevId : activeRec.id));
       }
     } catch (err) {
       console.warn('Backend meetings check:', err);
@@ -101,9 +130,14 @@ export const App: React.FC = () => {
       setLoading(false);
       return;
     }
-    fetchMeetings();
-    const interval = setInterval(fetchMeetings, 2500);
-    return () => clearInterval(interval);
+    fetchMeetings(true);
+    const interval = setInterval(() => fetchMeetings(false), 3000);
+    const onStatusUpdated = () => fetchMeetings(true);
+    window.addEventListener('vinxa-meeting-status-updated', onStatusUpdated);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('vinxa-meeting-status-updated', onStatusUpdated);
+    };
   }, [currentUser]);
 
   useEffect(() => {
@@ -112,6 +146,21 @@ export const App: React.FC = () => {
     async function loadAllActions() {
       setLoadingGlobalActions(true);
       try {
+        const meetingById = new Map<string, Meeting>(meetings.map((m) => [m.id, m]));
+        try {
+          const allItems = await api.getAllActionItems();
+          if (!cancelled && Array.isArray(allItems)) {
+            const list: { meeting: Meeting; item: ActionItem }[] = [];
+            for (const it of allItems) {
+              const m = it.meetingId ? meetingById.get(it.meetingId) : meetings[0];
+              if (m) list.push({ meeting: m, item: it });
+            }
+            setGlobalActionItems(list);
+            return;
+          }
+        } catch {
+          // Fallback if batch endpoint unavailable
+        }
         const list: { meeting: Meeting; item: ActionItem }[] = [];
         await Promise.all(
           meetings.slice(0, 15).map(async (m) => {

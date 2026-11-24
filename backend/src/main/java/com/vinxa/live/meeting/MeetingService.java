@@ -64,21 +64,70 @@ public class MeetingService {
                 return MeetingResponse.fromEntity(m);
             }
             UUID mId = m.getId();
-            int pCount = participantRepository.findByMeetingIdOrderByCreatedAtAsc(mId).size();
-            int sCount = transcriptSegmentRepository.findByMeetingIdOrderByStartMsAsc(mId).size();
-            int aCount = actionItemRepository.findByMeetingIdOrderByCreatedAtAsc(mId).size();
-            int dCount = 0;
-            com.vinxa.live.summary.MeetingSummary sum = meetingSummaryRepository.findByMeetingId(mId).orElse(null);
-            if (sum != null && sum.getSummary() != null) {
-                com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(sum.getSummary());
-                if (root.has("decisions") && root.get("decisions").isArray()) {
-                    dCount = root.get("decisions").size();
-                }
-            }
+            int pCount = (int) participantRepository.countByMeetingId(mId);
+            int sCount = (int) transcriptSegmentRepository.countByMeetingId(mId);
+            int aCount = (int) actionItemRepository.countByMeetingId(mId);
+            int dCount = extractDecisionCount(meetingSummaryRepository.findByMeetingId(mId).orElse(null));
             if (pCount == 0 && sCount > 0) pCount = 1;
             return MeetingResponse.fromEntityWithCounts(m, pCount, sCount, aCount, dCount);
         } catch (Exception e) {
             return MeetingResponse.fromEntity(m);
+        }
+    }
+
+    private int extractDecisionCount(com.vinxa.live.summary.MeetingSummary sum) {
+        if (sum == null || sum.getSummary() == null) return 0;
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(sum.getSummary());
+            if (root.has("decisions") && root.get("decisions").isArray()) {
+                return root.get("decisions").size();
+            }
+        } catch (Exception ignored) {
+        }
+        return 0;
+    }
+
+    private java.util.List<MeetingResponse> toBatchEnrichedResponses(java.util.List<Meeting> meetings) {
+        if (meetings == null || meetings.isEmpty()) {
+            return java.util.List.of();
+        }
+        if (participantRepository == null || transcriptSegmentRepository == null) {
+            return meetings.stream().map(MeetingResponse::fromEntity).toList();
+        }
+        try {
+            java.util.List<UUID> ids = meetings.stream().map(Meeting::getId).toList();
+
+            java.util.Map<UUID, Integer> pCounts = new java.util.HashMap<>();
+            for (Object[] row : participantRepository.countByMeetingIds(ids)) {
+                pCounts.put((UUID) row[0], ((Number) row[1]).intValue());
+            }
+
+            java.util.Map<UUID, Integer> sCounts = new java.util.HashMap<>();
+            for (Object[] row : transcriptSegmentRepository.countByMeetingIds(ids)) {
+                sCounts.put((UUID) row[0], ((Number) row[1]).intValue());
+            }
+
+            java.util.Map<UUID, Integer> aCounts = new java.util.HashMap<>();
+            for (Object[] row : actionItemRepository.countByMeetingIds(ids)) {
+                aCounts.put((UUID) row[0], ((Number) row[1]).intValue());
+            }
+
+            java.util.Map<UUID, Integer> dCounts = new java.util.HashMap<>();
+            for (com.vinxa.live.summary.MeetingSummary sum : meetingSummaryRepository.findByMeetingIds(ids)) {
+                dCounts.put(sum.getMeeting().getId(), extractDecisionCount(sum));
+            }
+
+            return meetings.stream().map(m -> {
+                UUID mId = m.getId();
+                int sCount = sCounts.getOrDefault(mId, 0);
+                int pCount = pCounts.getOrDefault(mId, 0);
+                if (pCount == 0 && sCount > 0) pCount = 1;
+                int aCount = aCounts.getOrDefault(mId, 0);
+                int dCount = dCounts.getOrDefault(mId, 0);
+                return MeetingResponse.fromEntityWithCounts(m, pCount, sCount, aCount, dCount);
+            }).toList();
+        } catch (Exception e) {
+            return meetings.stream().map(this::toEnrichedResponse).toList();
         }
     }
 
@@ -177,8 +226,9 @@ public class MeetingService {
 
     @Transactional(readOnly = true)
     public Page<MeetingResponse> listMeetings(User user, Pageable pageable) {
-        return meetingRepository.findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(user.getId(), pageable)
-                .map(this::toEnrichedResponse);
+        Page<Meeting> page = meetingRepository.findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(user.getId(), pageable);
+        java.util.List<MeetingResponse> enriched = toBatchEnrichedResponses(page.getContent());
+        return new org.springframework.data.domain.PageImpl<>(enriched, pageable, page.getTotalElements());
     }
 
     @Transactional(readOnly = true)
@@ -284,5 +334,37 @@ public class MeetingService {
         meeting.setPublicShared(false);
         meeting = meetingRepository.save(meeting);
         return toEnrichedResponse(meeting);
+    }
+
+    @Transactional(readOnly = true)
+    public java.util.List<com.vinxa.live.transcript.TranscriptController.ActionItemDto> listAllUserActionItems(User user) {
+        if (actionItemRepository == null) return java.util.List.of();
+        java.util.List<com.vinxa.live.actionitem.ActionItem> items = actionItemRepository.findAllByUserIdOrderByCreatedAtDesc(user.getId());
+        return items.stream()
+                .map(i -> new com.vinxa.live.transcript.TranscriptController.ActionItemDto(
+                        i.getId(),
+                        i.getMeeting().getId(),
+                        i.getTitle(),
+                        i.getTitle(),
+                        i.getAssignee(),
+                        i.getDeadline() != null ? i.getDeadline().toString() : null,
+                        i.getPriority() != null ? i.getPriority().toUpperCase() : "MEDIUM",
+                        i.getStatus(),
+                        parseEvidenceList(i.getEvidenceSegmentIds()),
+                        i.getCreatedAt() != null ? i.getCreatedAt().toString() : null
+                ))
+                .toList();
+    }
+
+    private static java.util.List<String> parseEvidenceList(String raw) {
+        if (raw == null || raw.isBlank()) return java.util.List.of();
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1);
+        }
+        return java.util.Arrays.stream(trimmed.split(","))
+                .map(s -> s.replace("\"", "").replace("'", "").trim())
+                .filter(s -> !s.isEmpty())
+                .toList();
     }
 }

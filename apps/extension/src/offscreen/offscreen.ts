@@ -5,13 +5,24 @@ let micStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
 let websocket: WebSocket | null = null;
 let eventWebsocket: WebSocket | null = null;
+let audioReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let eventReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let framesSent = 0;
 let isPaused = false;
+let isStopping = false;
 let activeWsBase = 'ws://localhost:8080';
+let activeMeetingId = '';
+let activeTicket = '';
+let activeLanguage = 'multi';
+
+// Bounded buffer of PCM16 frames during initial connect or transient WebSocket reconnection
+const MAX_BUFFERED_FRAMES = 40;
+const pendingPcmFrames: ArrayBuffer[] = [];
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'START_OFFSCREEN_CAPTURE') {
     isPaused = false;
+    isStopping = false;
     startCapture(
       message.streamId,
       message.meetingId,
@@ -32,12 +43,73 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   } else if (message.type === 'STOP_OFFSCREEN_CAPTURE') {
     isPaused = false;
+    isStopping = true;
     stopCapture()
       .then(() => sendResponse({ success: true }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
 });
+
+function connectAudioWebSocket(meetingId: string, ticket?: string, language: string = 'multi') {
+  if (isStopping || !mediaStream) return;
+  try {
+    if (websocket) {
+      websocket.onclose = null;
+      websocket.onerror = null;
+      try {
+        websocket.close();
+      } catch {}
+    }
+
+    const ticketParam = ticket ? `&ticket=${encodeURIComponent(ticket)}` : '';
+    const langParam = `&language=${encodeURIComponent(language || 'multi')}`;
+    const ws = new WebSocket(
+      `${activeWsBase}/ws/audio?meetingId=${encodeURIComponent(meetingId)}${ticketParam}${langParam}`
+    );
+    ws.binaryType = 'arraybuffer';
+    websocket = ws;
+
+    ws.onopen = () => {
+      if (isStopping) {
+        ws.close();
+        return;
+      }
+      ws.send(
+        JSON.stringify({
+          type: 'START_SESSION',
+          meetingId,
+          language: language || 'multi',
+          sampleRate: 16000,
+          channels: 1,
+          encoding: 'linear16'
+        })
+      );
+      while (pendingPcmFrames.length > 0 && ws.readyState === WebSocket.OPEN) {
+        const frame = pendingPcmFrames.shift();
+        if (frame) ws.send(frame);
+      }
+    };
+
+    ws.onclose = () => {
+      if (isStopping || !mediaStream) return;
+      if (audioReconnectTimer) clearTimeout(audioReconnectTimer);
+      audioReconnectTimer = setTimeout(() => {
+        if (!isStopping && mediaStream) {
+          connectAudioWebSocket(activeMeetingId, activeTicket, activeLanguage);
+        }
+      }, 1000);
+    };
+
+    ws.onerror = () => {
+      try {
+        ws.close();
+      } catch {}
+    };
+  } catch (e) {
+    console.warn('[Vinxa Offscreen] Audio WS connect error:', e);
+  }
+}
 
 async function startCapture(
   streamId: string,
@@ -49,6 +121,12 @@ async function startCapture(
   try {
     framesSent = 0;
     isPaused = false;
+    isStopping = false;
+    pendingPcmFrames.length = 0;
+    activeMeetingId = meetingId;
+    activeTicket = ticket || '';
+    activeLanguage = language || 'multi';
+
     if (wsBase) {
       activeWsBase = wsBase;
     } else {
@@ -67,18 +145,18 @@ async function startCapture(
       video: false
     });
 
-    // 2. Setup AudioContext at 16kHz
-    audioContext = new AudioContext({ sampleRate: 16000 });
+    // 2. Setup AudioContext at 16kHz with interactive latency hint
+    audioContext = new AudioContext({ sampleRate: 16000, latencyHint: 'interactive' });
     if (audioContext.state === 'suspended') {
       await audioContext.resume();
     }
 
-    // 3. Play tab audio to speakers so user hears other meeting participants
+    // 3. Play tab audio to speakers so user hears other meeting participants without delay
     const tabSource = audioContext.createMediaStreamSource(mediaStream);
     tabSource.connect(audioContext.destination);
 
-    // 4. Create ScriptProcessorNode (4096 buffer size, 1 channel in, 1 channel out)
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    // 4. Create low-latency 2048-sample processor (128ms at 16kHz — 50% lower latency than 4096)
+    const processor = audioContext.createScriptProcessor(2048, 1, 1);
     tabSource.connect(processor);
 
     // 5. Connect processor to muted gain node to satisfy Web Audio active graph requirement
@@ -103,33 +181,15 @@ async function startCapture(
       console.warn('[Vinxa Offscreen] Local microphone not available or denied:', micErr);
     }
 
-    // 7. Connect to Vinxa Backend Realtime Audio WebSocket
-    const ticketParam = ticket ? `&ticket=${encodeURIComponent(ticket)}` : '';
-    const langParam = `&language=${encodeURIComponent(language || 'multi')}`;
-    websocket = new WebSocket(
-      `${activeWsBase}/ws/audio?meetingId=${encodeURIComponent(meetingId)}${ticketParam}${langParam}`
-    );
-    websocket.binaryType = 'arraybuffer';
-
-    websocket.onopen = () => {
-      websocket?.send(
-        JSON.stringify({
-          type: 'START_SESSION',
-          meetingId,
-          language: language || 'multi',
-          sampleRate: 16000,
-          channels: 1,
-          encoding: 'linear16'
-        })
-      );
-    };
+    // 7. Connect to Vinxa Backend Realtime Audio WebSocket with auto-reconnect
+    connectAudioWebSocket(meetingId, ticket, language);
 
     // 8. Connect to Vinxa Backend Live Transcript Event WebSocket
     connectEventWebSocket(meetingId);
 
     // 9. Stream 16-bit Linear PCM audio frames (or silent keep-alive frames when paused)
     processor.onaudioprocess = (e) => {
-      if (!websocket || websocket.readyState !== WebSocket.OPEN) return;
+      if (isStopping) return;
 
       const inputData = e.inputBuffer.getChannelData(0);
       const pcm16Buffer = new ArrayBuffer(inputData.length * 2);
@@ -137,7 +197,7 @@ async function startCapture(
       if (isPaused) {
         // Send zeroed keep-alive buffer every ~2.5s so Deepgram connection stays open while paused
         framesSent++;
-        if (framesSent % 10 === 0) {
+        if (framesSent % 20 === 0 && websocket && websocket.readyState === WebSocket.OPEN) {
           websocket.send(pcm16Buffer);
           chrome.runtime
             .sendMessage({
@@ -159,17 +219,24 @@ async function startCapture(
         sumSquares += s * s;
       }
 
-      websocket.send(pcm16Buffer);
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        websocket.send(pcm16Buffer);
+      } else {
+        if (pendingPcmFrames.length >= MAX_BUFFERED_FRAMES) {
+          pendingPcmFrames.shift();
+        }
+        pendingPcmFrames.push(pcm16Buffer);
+      }
       framesSent++;
 
-      if (framesSent % 15 === 0) {
+      if (framesSent % 24 === 0) {
         const rms = Math.sqrt(sumSquares / inputData.length);
         chrome.runtime
           .sendMessage({
             type: 'AUDIO_STATS',
             framesSent,
             rms,
-            isTransmitting: true
+            isTransmitting: Boolean(websocket && websocket.readyState === WebSocket.OPEN)
           })
           .catch(() => {});
       }
@@ -184,6 +251,7 @@ async function startCapture(
 }
 
 function connectEventWebSocket(meetingId: string) {
+  if (isStopping) return;
   try {
     if (eventWebsocket) {
       eventWebsocket.onclose = null;
@@ -196,7 +264,11 @@ function connectEventWebSocket(meetingId: string) {
       if (isPaused) return;
       try {
         const data = JSON.parse(ev.data);
-        if (data.type === 'TRANSCRIPT_INTERIM' || data.type === 'TRANSCRIPT') {
+        if (
+          data.type === 'TRANSCRIPT_INTERIM' ||
+          data.type === 'TRANSCRIPT' ||
+          data.type === 'SPEAKER_RENAMED'
+        ) {
           chrome.runtime
             .sendMessage({
               type: 'LIVE_TRANSCRIPT_EVENT',
@@ -210,10 +282,11 @@ function connectEventWebSocket(meetingId: string) {
       }
     };
     eventWebsocket.onclose = () => {
-      if (mediaStream) {
-        setTimeout(() => {
-          if (mediaStream) connectEventWebSocket(meetingId);
-        }, 1500);
+      if (!isStopping && mediaStream) {
+        if (eventReconnectTimer) clearTimeout(eventReconnectTimer);
+        eventReconnectTimer = setTimeout(() => {
+          if (!isStopping && mediaStream) connectEventWebSocket(meetingId);
+        }, 1200);
       }
     };
   } catch (e) {
@@ -222,6 +295,18 @@ function connectEventWebSocket(meetingId: string) {
 }
 
 async function stopCapture(): Promise<void> {
+  isStopping = true;
+  pendingPcmFrames.length = 0;
+
+  if (audioReconnectTimer) {
+    clearTimeout(audioReconnectTimer);
+    audioReconnectTimer = null;
+  }
+  if (eventReconnectTimer) {
+    clearTimeout(eventReconnectTimer);
+    eventReconnectTimer = null;
+  }
+
   if (eventWebsocket) {
     try {
       eventWebsocket.onclose = null;
@@ -230,13 +315,16 @@ async function stopCapture(): Promise<void> {
     eventWebsocket = null;
   }
 
-  if (websocket && websocket.readyState === WebSocket.OPEN) {
+  if (websocket) {
     try {
-      websocket.send(JSON.stringify({ type: 'STOP_SESSION' }));
+      websocket.onclose = null;
+      if (websocket.readyState === WebSocket.OPEN) {
+        websocket.send(JSON.stringify({ type: 'STOP_SESSION' }));
+      }
       websocket.close();
     } catch (e) {}
+    websocket = null;
   }
-  websocket = null;
 
   if (mediaStream) {
     mediaStream.getTracks().forEach((track) => {

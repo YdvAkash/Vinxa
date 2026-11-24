@@ -27,6 +27,26 @@ public class TranscriptController {
     private final ActionItemRepository actionItemRepository;
     private final ParticipantRepository participantRepository;
     private final com.vinxa.live.stt.SpeechToTextProvider sttProvider;
+    private final com.vinxa.live.realtime.AudioWebSocketHandler audioWebSocketHandler;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public TranscriptController(
+            MeetingService meetingService,
+            TranscriptSegmentRepository transcriptSegmentRepository,
+            MeetingSummaryRepository meetingSummaryRepository,
+            ActionItemRepository actionItemRepository,
+            ParticipantRepository participantRepository,
+            com.vinxa.live.stt.SpeechToTextProvider sttProvider,
+            com.vinxa.live.realtime.AudioWebSocketHandler audioWebSocketHandler
+    ) {
+        this.meetingService = meetingService;
+        this.transcriptSegmentRepository = transcriptSegmentRepository;
+        this.meetingSummaryRepository = meetingSummaryRepository;
+        this.actionItemRepository = actionItemRepository;
+        this.participantRepository = participantRepository;
+        this.sttProvider = sttProvider;
+        this.audioWebSocketHandler = audioWebSocketHandler;
+    }
 
     public TranscriptController(
             MeetingService meetingService,
@@ -36,12 +56,7 @@ public class TranscriptController {
             ParticipantRepository participantRepository,
             com.vinxa.live.stt.SpeechToTextProvider sttProvider
     ) {
-        this.meetingService = meetingService;
-        this.transcriptSegmentRepository = transcriptSegmentRepository;
-        this.meetingSummaryRepository = meetingSummaryRepository;
-        this.actionItemRepository = actionItemRepository;
-        this.participantRepository = participantRepository;
-        this.sttProvider = sttProvider;
+        this(meetingService, transcriptSegmentRepository, meetingSummaryRepository, actionItemRepository, participantRepository, sttProvider, null);
     }
 
     @PostMapping("/language")
@@ -57,6 +72,7 @@ public class TranscriptController {
     }
 
     @GetMapping("/transcript")
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public ResponseEntity<List<TranscriptSegmentDto>> getTranscript(@PathVariable("id") UUID meetingId) {
         User user = SecurityUtils.getCurrentUser();
         meetingService.getMeetingAndVerifyOwnership(user, meetingId);
@@ -136,6 +152,7 @@ public class TranscriptController {
     }
 
     @GetMapping("/actions")
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public ResponseEntity<List<ActionItemDto>> getActionItems(@PathVariable("id") UUID meetingId) {
         User user = SecurityUtils.getCurrentUser();
         meetingService.getMeetingAndVerifyOwnership(user, meetingId);
@@ -238,9 +255,12 @@ public class TranscriptController {
         }
 
         String displayName = body.get("displayName");
-        if (displayName != null) {
-            participant.setDisplayName(displayName);
+        if (displayName != null && !displayName.isBlank()) {
+            participant.setDisplayName(displayName.trim());
             participant = participantRepository.save(participant);
+            if (audioWebSocketHandler != null) {
+                audioWebSocketHandler.registerSpeakerDisplayName(meetingId, participant.getSpeakerKey(), participant.getDisplayName());
+            }
         }
 
         return ResponseEntity.ok(participant);
@@ -264,6 +284,9 @@ public class TranscriptController {
                 .orElseGet(() -> new Participant(UUID.randomUUID(), meeting, speakerKey, displayName.trim()));
         participant.setDisplayName(displayName.trim());
         participant = participantRepository.save(participant);
+        if (audioWebSocketHandler != null) {
+            audioWebSocketHandler.registerSpeakerDisplayName(meetingId, speakerKey, participant.getDisplayName());
+        }
 
         return ResponseEntity.ok(participant);
     }

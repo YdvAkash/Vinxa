@@ -100,7 +100,7 @@ function injectIntoAllOpenTabs() {
   );
 }
 
-// Background 1.5s DB sync during active recording so on-screen overlay always has latest turns
+// Background 3.5s DB reconciliation during active recording (only writes/broadcasts when segments actually change)
 setInterval(async () => {
   if (currentState !== 'RECORDING' || isPaused || !activeMeetingId) return;
   try {
@@ -116,19 +116,30 @@ setInterval(async () => {
     if (res.ok) {
       const dbSegs = await res.json();
       if (Array.isArray(dbSegs) && dbSegs.length >= liveSegments.length) {
-        liveSegments = dbSegs.slice(-50).map((s: any) => ({
+        const nextSegs: LiveSegmentItem[] = dbSegs.slice(-50).map((s: any) => ({
           id: s.id,
           speakerKey: s.speakerKey || 'speaker-1',
           speakerName: s.speakerName || 'Speaker 1',
           text: s.text,
           startMs: s.startMs || 0
         }));
-        chrome.storage.local.set({ liveSegments });
-        broadcastToMeetingTab();
+        const hasChanged =
+          nextSegs.length !== liveSegments.length ||
+          nextSegs.some(
+            (s, idx) =>
+              s.id !== liveSegments[idx]?.id ||
+              s.speakerName !== liveSegments[idx]?.speakerName ||
+              s.text !== liveSegments[idx]?.text
+          );
+        if (hasChanged) {
+          liveSegments = nextSegs;
+          chrome.storage.local.set({ liveSegments });
+          broadcastToMeetingTab();
+        }
       }
     }
   } catch {}
-}, 1500);
+}, 3500);
 
 // Strictly retrieve authenticated session token — never silently auto-login with dummy credentials
 async function getBackendAuthToken(): Promise<string> {
@@ -356,7 +367,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const ev = message.event;
     if (ev) {
       if (ev.type === 'TRANSCRIPT_INTERIM') {
-        liveInterimText = ev.text || '';
+        const nextInterim = ev.text || '';
+        if (nextInterim !== liveInterimText) {
+          liveInterimText = nextInterim;
+          chrome.storage.local.set({ liveInterimText });
+          broadcastToMeetingTab();
+        }
       } else if (ev.type === 'TRANSCRIPT' && ev.text) {
         liveInterimText = '';
         const segId = ev.segmentId || 'seg-' + Date.now();
@@ -372,9 +388,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           ];
         }
+        chrome.storage.local.set({ liveSegments, liveInterimText });
+        broadcastToMeetingTab();
+      } else if (ev.type === 'SPEAKER_RENAMED' && ev.speakerKey && ev.speakerName) {
+        liveSegments = liveSegments.map((s) =>
+          s.speakerKey === ev.speakerKey ? { ...s, speakerName: ev.speakerName } : s
+        );
+        chrome.storage.local.set({ liveSegments });
+        broadcastToMeetingTab();
       }
-      chrome.storage.local.set({ liveSegments, liveInterimText });
-      broadcastToMeetingTab();
     }
     sendResponse({ success: true });
     return true;

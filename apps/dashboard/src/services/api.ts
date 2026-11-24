@@ -323,6 +323,11 @@ export const api = {
     return res.json();
   },
 
+  async getAllActionItems(): Promise<ActionItem[]> {
+    const res = await authFetch('/meetings/actions/all');
+    return res.json();
+  },
+
   async toggleActionItem(meetingId: string, actionId: string): Promise<ActionItem> {
     const res = await authFetch(`/meetings/${meetingId}/actions/${actionId}`, {
       method: 'PATCH'

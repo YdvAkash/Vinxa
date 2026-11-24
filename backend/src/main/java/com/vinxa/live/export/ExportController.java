@@ -40,6 +40,7 @@ public class ExportController {
     }
 
     @GetMapping
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public ResponseEntity<String> exportMeeting(
             @PathVariable("id") UUID meetingId,
             @RequestParam(value = "format", defaultValue = "md") String format

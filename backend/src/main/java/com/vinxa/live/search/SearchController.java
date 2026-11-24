@@ -32,7 +32,7 @@ public class SearchController {
 
         List<TranscriptSegment> segments;
         if (meetingId != null) {
-            segments = transcriptSegmentRepository.searchByMeetingAndContent(meetingId, query);
+            segments = transcriptSegmentRepository.searchByMeetingAndUserAndContent(meetingId, user.getId(), query);
         } else {
             segments = transcriptSegmentRepository.searchByUserAndContent(user.getId(), query);
         }

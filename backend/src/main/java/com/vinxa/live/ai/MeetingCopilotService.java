@@ -42,6 +42,24 @@ public class MeetingCopilotService {
 
     private final String geminiApiKey;
     private final String geminiModel;
+    private final Map<String, String> translationCache = java.util.Collections.synchronizedMap(
+            new LinkedHashMap<String, String>(512, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                    return size() > 2000;
+                }
+            }
+    );
+
+    private List<String> buildCandidateModels() {
+        Set<String> models = new LinkedHashSet<>();
+        models.add(geminiModel);
+        models.add("gemini-flash-lite-latest");
+        models.add("gemini-2.5-flash-lite");
+        models.add("gemini-2.0-flash");
+        models.add("gemini-1.5-flash");
+        return new ArrayList<>(models);
+    }
 
     public MeetingCopilotService(
             MeetingRepository meetingRepository,
@@ -178,15 +196,10 @@ public class MeetingCopilotService {
 
         // 4. Call Google Gemini AI with fallback chain
         if (!geminiApiKey.isEmpty()) {
-            List<String> candidateModels = new ArrayList<>();
-            candidateModels.add(geminiModel);
-            if (!geminiModel.equals("gemini-flash-lite-latest")) candidateModels.add("gemini-flash-lite-latest");
-            if (!geminiModel.equals("gemini-3.5-flash-lite")) candidateModels.add("gemini-3.5-flash-lite");
-
-            for (String modelToTry : candidateModels) {
+            for (String modelToTry : buildCandidateModels()) {
                 try {
-                    log.info("Asking Vinxa AI Copilot ({}) across {} meetings ({} segments): '{}'",
-                            modelToTry, targetMeetings.size(), totalSegmentsCount, question);
+                    log.info("Asking Vinxa AI Copilot ({}) across {} meetings ({} segments)",
+                            modelToTry, targetMeetings.size(), totalSegmentsCount);
                     CopilotAskResponse aiResp = callGeminiCopilot(
                             question,
                             knowledgeContext.toString(),
@@ -266,11 +279,12 @@ public class MeetingCopilotService {
         );
 
         String jsonPayload = objectMapper.writeValueAsString(requestBody);
-        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent?key=" + geminiApiKey;
+        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent";
 
         HttpRequest httpRequest = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint))
                 .header("Content-Type", "application/json")
+                .header("x-goog-api-key", geminiApiKey)
                 .timeout(Duration.ofSeconds(30))
                 .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                 .build();
@@ -431,13 +445,29 @@ public class MeetingCopilotService {
             return texts;
         }
 
-        if (!geminiApiKey.isEmpty()) {
-            List<String> candidateModels = new ArrayList<>();
-            candidateModels.add(geminiModel);
-            if (!geminiModel.equals("gemini-flash-lite-latest")) candidateModels.add("gemini-flash-lite-latest");
-            if (!geminiModel.equals("gemini-3.5-flash-lite")) candidateModels.add("gemini-3.5-flash-lite");
+        String normalizedLang = targetLanguage.trim();
+        List<String> finalResults = new ArrayList<>(Collections.nCopies(texts.size(), null));
+        List<String> uncachedTexts = new ArrayList<>();
+        List<Integer> uncachedIndices = new ArrayList<>();
 
-            for (String modelToTry : candidateModels) {
+        for (int i = 0; i < texts.size(); i++) {
+            String src = texts.get(i) != null ? texts.get(i) : "";
+            String cacheKey = normalizedLang + "::" + src;
+            String cached = translationCache.get(cacheKey);
+            if (cached != null) {
+                finalResults.set(i, cached);
+            } else {
+                uncachedTexts.add(src);
+                uncachedIndices.add(i);
+            }
+        }
+
+        if (uncachedTexts.isEmpty()) {
+            return finalResults;
+        }
+
+        if (!geminiApiKey.isEmpty()) {
+            for (String modelToTry : buildCandidateModels()) {
                 try {
                     String prompt = """
                             Translate each string in the following JSON array into %s.
@@ -447,9 +477,9 @@ public class MeetingCopilotService {
                             Input JSON array:
                             %s
                             """.formatted(
-                            targetLanguage,
-                            texts.size(),
-                            objectMapper.writeValueAsString(texts)
+                            normalizedLang,
+                            uncachedTexts.size(),
+                            objectMapper.writeValueAsString(uncachedTexts)
                     );
 
                     Map<String, Object> requestBody = Map.of(
@@ -461,11 +491,12 @@ public class MeetingCopilotService {
                     );
 
                     String jsonPayload = objectMapper.writeValueAsString(requestBody);
-                    String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + modelToTry + ":generateContent?key=" + geminiApiKey;
+                    String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + modelToTry + ":generateContent";
 
                     HttpRequest httpRequest = HttpRequest.newBuilder()
                             .uri(URI.create(endpoint))
                             .header("Content-Type", "application/json")
+                            .header("x-goog-api-key", geminiApiKey)
                             .timeout(Duration.ofSeconds(20))
                             .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
                             .build();
@@ -480,11 +511,16 @@ public class MeetingCopilotService {
                         JsonNode parsed = objectMapper.readTree(rawJson.trim());
                         JsonNode arr = parsed.isArray() ? parsed : parsed.path("translations");
                         if (arr.isArray() && !arr.isEmpty()) {
-                            List<String> result = new ArrayList<>();
-                            for (JsonNode n : arr) {
-                                result.add(n.asText(""));
+                            for (int j = 0; j < uncachedIndices.size(); j++) {
+                                int targetIdx = uncachedIndices.get(j);
+                                String srcText = uncachedTexts.get(j);
+                                String trText = j < arr.size() && !arr.get(j).asText("").isBlank()
+                                        ? arr.get(j).asText("")
+                                        : srcText;
+                                finalResults.set(targetIdx, trText);
+                                translationCache.put(normalizedLang + "::" + srcText, trText);
                             }
-                            return result;
+                            return finalResults;
                         }
                     }
                 } catch (Exception ex) {
@@ -492,6 +528,10 @@ public class MeetingCopilotService {
                 }
             }
         }
-        return texts;
+
+        for (int j = 0; j < uncachedIndices.size(); j++) {
+            finalResults.set(uncachedIndices.get(j), uncachedTexts.get(j));
+        }
+        return finalResults;
     }
 }
