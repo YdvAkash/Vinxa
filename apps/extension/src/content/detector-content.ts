@@ -803,6 +803,7 @@
 
     /* Frosted Speech Turn Bubble */
     .turn-item {
+      flex-shrink: 0;
       background: var(--glass-turn-bg);
       border: 1px solid var(--glass-turn-border);
       border-left: 3.5px solid #10b981;
@@ -865,6 +866,7 @@
     }
 
     .interim-box {
+      flex-shrink: 0;
       background: rgba(16, 185, 129, 0.18);
       border: 1px solid rgba(16, 185, 129, 0.45);
       border-radius: 14px;
@@ -1096,10 +1098,35 @@
   // Transcript Feed Area
   const feedBox = document.createElement('div');
   feedBox.className = 'feed-box';
+  let lastManualUserWheelAt = 0;
+
+  feedBox.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.deltaY < 0) {
+        lastManualUserWheelAt = Date.now();
+        userScrolledUp = true;
+        resumeScrollBtn.style.display = segments.length > 0 ? 'block' : 'none';
+      } else {
+        const dist = feedBox.scrollHeight - feedBox.scrollTop - feedBox.clientHeight;
+        if (dist <= 50) {
+          userScrolledUp = false;
+          resumeScrollBtn.style.display = 'none';
+        }
+      }
+    },
+    { passive: true }
+  );
+
   feedBox.addEventListener('scroll', () => {
     const dist = feedBox.scrollHeight - feedBox.scrollTop - feedBox.clientHeight;
-    userScrolledUp = dist > 45;
-    resumeScrollBtn.style.display = userScrolledUp && segments.length > 0 ? 'block' : 'none';
+    if (dist <= 35) {
+      userScrolledUp = false;
+      resumeScrollBtn.style.display = 'none';
+    } else if (Date.now() - lastManualUserWheelAt < 1500 && dist > 55) {
+      userScrolledUp = true;
+      resumeScrollBtn.style.display = segments.length > 0 ? 'block' : 'none';
+    }
   });
   card.appendChild(feedBox);
 
@@ -1304,7 +1331,11 @@
     });
 
     if (interimText && !isPaused) {
-      const expectedInterim = `🎙️ ${interimText}`;
+      const liveSpeaker =
+        activeSpeakingJoinee ||
+        (detectedJoinees.length > 0 ? detectedJoinees[0] : null) ||
+        (segments.length > 0 ? resolveHudSpeakerDisplayName(segments[segments.length - 1]) : 'Live Speaker');
+      const expectedInterim = `🎙️ ${liveSpeaker}: ${interimText}`;
       if (!interimNode) {
         const interim = document.createElement('div');
         interim.className = 'interim-box';
@@ -1322,8 +1353,15 @@
       interimNode.remove();
     }
 
-    if (!userScrolledUp) {
+    if (!userScrolledUp || Date.now() - lastManualUserWheelAt > 8000) {
+      userScrolledUp = false;
+      resumeScrollBtn.style.display = 'none';
       feedBox.scrollTop = feedBox.scrollHeight;
+      requestAnimationFrame(() => {
+        if (!userScrolledUp) {
+          feedBox.scrollTop = feedBox.scrollHeight;
+        }
+      });
     }
   }
 
@@ -1417,7 +1455,19 @@
     if (msg.type === 'LIVE_TRANSCRIPT_UPDATE') {
       isRecording = msg.state === 'RECORDING';
       if (typeof msg.isPaused === 'boolean') isPaused = msg.isPaused;
-      activeMeetingId = msg.meetingId || activeMeetingId;
+      if (msg.meetingId && msg.meetingId !== activeMeetingId) {
+        activeMeetingId = msg.meetingId;
+        segments = [];
+        interimText = '';
+        userScrolledUp = false;
+        clearChildren(feedBox);
+      }
+      if (msg.state === 'IDLE') {
+        segments = [];
+        interimText = '';
+        userScrolledUp = false;
+        clearChildren(feedBox);
+      }
       startTime = msg.startTime || startTime;
       if (typeof msg.isAuthenticated === 'boolean') isAuthenticated = msg.isAuthenticated;
       if (msg.userEmail) currentUserEmail = msg.userEmail;
@@ -1461,6 +1511,12 @@
       changed = true;
     }
     if (changes.activeMeetingId) {
+      if (changes.activeMeetingId.newValue !== activeMeetingId) {
+        segments = [];
+        interimText = '';
+        userScrolledUp = false;
+        clearChildren(feedBox);
+      }
       activeMeetingId = changes.activeMeetingId.newValue;
       changed = true;
     }

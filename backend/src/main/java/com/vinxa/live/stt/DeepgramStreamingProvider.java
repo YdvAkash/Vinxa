@@ -151,10 +151,14 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
         }
         try {
             String encodedLang = URLEncoder.encode(lang, StandardCharsets.UTF_8);
-            String url = "wss://api.deepgram.com/v1/listen?model=nova-2"
+            String modelName = ("en".equalsIgnoreCase(lang) || "en-US".equalsIgnoreCase(lang))
+                    ? "nova-2-meeting"
+                    : "nova-2";
+            String url = "wss://api.deepgram.com/v1/listen?model=" + modelName
                     + "&language=" + encodedLang
                     + "&encoding=linear16&sample_rate=16000&channels=1"
-                    + "&diarize=true&punctuate=true&smart_format=true&interim_results=true&endpointing=300&vad_events=false";
+                    + "&diarize=true&punctuate=true&smart_format=true&no_delay=true"
+                    + "&interim_results=true&endpointing=400&utterance_end_ms=1000&vad_events=false";
 
             httpClient.newWebSocketBuilder()
                     .header("Authorization", "Token " + apiKey)

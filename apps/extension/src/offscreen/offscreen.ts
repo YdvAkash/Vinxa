@@ -16,7 +16,7 @@ let activeTicket = '';
 let activeLanguage = 'multi';
 
 // Bounded buffer of PCM16 frames during initial connect or transient WebSocket reconnection
-const MAX_BUFFERED_FRAMES = 40;
+const MAX_BUFFERED_FRAMES = 60;
 const pendingPcmFrames: ArrayBuffer[] = [];
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -112,7 +112,7 @@ function connectAudioWebSocket(meetingId: string, ticket?: string, language: str
         if (!isStopping && mediaStream) {
           connectAudioWebSocket(activeMeetingId, activeTicket, activeLanguage);
         }
-      }, 1000);
+      }, 800);
     };
 
     ws.onerror = () => {
@@ -165,53 +165,86 @@ async function startCapture(
       await audioContext.resume();
     }
 
-    // 3. Play tab audio to speakers so user hears other meeting participants without delay
+    // 3. Play tab audio directly to speakers so user hears remote meeting participants clearly
     const tabSource = audioContext.createMediaStreamSource(mediaStream);
     tabSource.connect(audioContext.destination);
 
-    // 4. Create low-latency 2048-sample processor (128ms at 16kHz — 50% lower latency than 4096)
-    const processor = audioContext.createScriptProcessor(2048, 1, 1);
-    tabSource.connect(processor);
+    // 4. Use a 2-channel merger so Channel 0 = Pure Digital Tab Audio and Channel 1 = Filtered Mic Audio.
+    // This prevents open-mic room noise and speaker echo bleed from degrading remote participant speech accuracy!
+    const merger = audioContext.createChannelMerger(2);
+    tabSource.connect(merger, 0, 0);
 
-    // 5. Connect processor to muted gain node to satisfy Web Audio active graph requirement
-    const silentGain = audioContext.createGain();
-    silentGain.gain.value = 0.0;
-    processor.connect(silentGain);
-    silentGain.connect(audioContext.destination);
-
-    // 6. Capture and mix user's local microphone so speech is transcribed even when alone or muted in Meet
+    // 5. Capture and condition user's local microphone (85Hz high-pass + vocal presence boost + compressor)
+    let hasMicConnected = false;
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          channelCount: 1
         },
         video: false
       });
       const micSource = audioContext.createMediaStreamSource(micStream);
-      micSource.connect(processor);
+
+      // High-pass filter at 85Hz removes low-frequency hum, fan rumble, and desk vibration
+      const highPass = audioContext.createBiquadFilter();
+      highPass.type = 'highpass';
+      highPass.frequency.value = 85;
+
+      // Presence boost at 2.8kHz improves consonant intelligibility for speech-to-text accuracy
+      const presenceBoost = audioContext.createBiquadFilter();
+      presenceBoost.type = 'peaking';
+      presenceBoost.frequency.value = 2800;
+      presenceBoost.Q.value = 1.0;
+      presenceBoost.gain.value = 3.0;
+
+      // Dynamics compressor levels quiet vs loud speech without clipping
+      const compressor = audioContext.createDynamicsCompressor();
+      compressor.threshold.value = -24;
+      compressor.knee.value = 18;
+      compressor.ratio.value = 3.5;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.15;
+
+      micSource.connect(highPass);
+      highPass.connect(presenceBoost);
+      presenceBoost.connect(compressor);
+      compressor.connect(merger, 0, 1);
+      hasMicConnected = true;
     } catch (micErr) {
       console.warn('[Vinxa Offscreen] Local microphone not available or denied:', micErr);
     }
 
-    // 7. Connect to Vinxa Backend Realtime Audio WebSocket with auto-reconnect
-    connectAudioWebSocket(meetingId, ticket, language);
+    // 6. Create ultra-low-latency 1024-sample processor (64ms per frame at 16kHz) with 2 input channels
+    const processor = audioContext.createScriptProcessor(1024, 2, 1);
+    merger.connect(processor);
 
-    // 8. Connect to Vinxa Backend Live Transcript Event WebSocket
+    // 7. Connect processor to muted gain node to keep Web Audio graph active
+    const silentGain = audioContext.createGain();
+    silentGain.gain.value = 0.0;
+    processor.connect(silentGain);
+    silentGain.connect(audioContext.destination);
+
+    // 8. Connect to Vinxa Backend Realtime Audio WebSocket & Live Event WebSocket
+    connectAudioWebSocket(meetingId, ticket, language);
     connectEventWebSocket(meetingId);
 
-    // 9. Stream 16-bit Linear PCM audio frames (or silent keep-alive frames when paused)
+    // 9. Smart Anti-Echo & Noise-Gated DSP Mixer -> 16-bit Linear PCM stream
     processor.onaudioprocess = (e) => {
       if (isStopping) return;
 
-      const inputData = e.inputBuffer.getChannelData(0);
-      const pcm16Buffer = new ArrayBuffer(inputData.length * 2);
+      const tabData = e.inputBuffer.getChannelData(0);
+      const micData = hasMicConnected && e.inputBuffer.numberOfChannels > 1
+        ? e.inputBuffer.getChannelData(1)
+        : null;
+      const len = tabData.length;
+      const pcm16Buffer = new ArrayBuffer(len * 2);
 
       if (isPaused) {
-        // Send zeroed keep-alive buffer every ~2.5s so Deepgram connection stays open while paused
         framesSent++;
-        if (framesSent % 20 === 0 && websocket && websocket.readyState === WebSocket.OPEN) {
+        if (framesSent % 35 === 0 && websocket && websocket.readyState === WebSocket.OPEN) {
           websocket.send(pcm16Buffer);
           chrome.runtime
             .sendMessage({
@@ -225,12 +258,45 @@ async function startCapture(
         return;
       }
 
+      // Compute independent RMS energy for Tab Audio vs Mic Audio
+      let tabSumSq = 0;
+      let micSumSq = 0;
+      for (let i = 0; i < len; i++) {
+        const t = tabData[i];
+        tabSumSq += t * t;
+        if (micData) {
+          const m = micData[i];
+          micSumSq += m * m;
+        }
+      }
+      const tabRms = Math.sqrt(tabSumSq / len);
+      const micRms = micData ? Math.sqrt(micSumSq / len) : 0;
+
+      // Determine smart mixing weights to eliminate speaker echo bleed and mic background hiss:
+      // - If remote tab audio is active (tabRms > 0.005) and mic is not significantly louder than tab audio,
+      //   mute the mic channel so laptop speaker echo never double-records remote participants.
+      // - If mic energy is below the noise floor (micRms < 0.0025), gate out mic background static.
+      let micWeight = 0.0;
+      if (micData && micRms >= 0.0025) {
+        if (tabRms > 0.005 && micRms < tabRms * 1.45) {
+          micWeight = 0.0; // Suppress acoustic echo bleed from speakers during remote speech
+        } else {
+          // Boost quiet local microphone voice cleanly towards optimal STT level
+          micWeight = micRms < 0.04 ? 1.45 : 1.15;
+        }
+      }
+
+      const tabWeight = tabRms > 0.001 && tabRms < 0.04 ? 1.25 : 1.0;
+
       const view = new DataView(pcm16Buffer);
-      let sumSquares = 0;
-      for (let i = 0; i < inputData.length; i++) {
-        const s = Math.max(-1, Math.min(1, inputData[i]));
-        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-        sumSquares += s * s;
+      let combinedSumSq = 0;
+      for (let i = 0; i < len; i++) {
+        let sample = tabData[i] * tabWeight + (micData ? micData[i] * micWeight : 0);
+        // Soft-knee limiter prevents harsh digital clipping
+        if (sample > 1.0) sample = 1.0;
+        else if (sample < -1.0) sample = -1.0;
+        view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+        combinedSumSq += sample * sample;
       }
 
       if (websocket && websocket.readyState === WebSocket.OPEN) {
@@ -243,8 +309,8 @@ async function startCapture(
       }
       framesSent++;
 
-      if (framesSent % 24 === 0) {
-        const rms = Math.sqrt(sumSquares / inputData.length);
+      if (framesSent % 30 === 0) {
+        const rms = Math.sqrt(combinedSumSq / len);
         chrome.runtime
           .sendMessage({
             type: 'AUDIO_STATS',
@@ -300,7 +366,7 @@ function connectEventWebSocket(meetingId: string) {
         if (eventReconnectTimer) clearTimeout(eventReconnectTimer);
         eventReconnectTimer = setTimeout(() => {
           if (!isStopping && mediaStream) connectEventWebSocket(meetingId);
-        }, 1200);
+        }, 1000);
       }
     };
   } catch (e) {

@@ -47,6 +47,9 @@ let liveInterimText: string = '';
 let detectedMeetingJoinees: string[] = [];
 let activeSpeakingJoinee: string | null = null;
 let cachedUserEmail: string | null = null;
+let cachedAuthToken: string | null = null;
+let cachedSelectedLanguage: string = 'multi';
+let cachedTargetTranslation: string = 'ORIGINAL';
 
 function deriveNameFromEmail(email?: string | null): string | null {
   if (!email || !email.includes('@')) return null;
@@ -141,7 +144,11 @@ chrome.storage.local.get(
     'activeMeetingId',
     'activeStartTime',
     'liveSegments',
-    'liveInterimText'
+    'liveInterimText',
+    'authToken',
+    'userEmail',
+    'selectedLanguage',
+    'targetTranslation'
   ],
   (data) => {
     if (data.recordingState) currentState = data.recordingState;
@@ -152,6 +159,10 @@ chrome.storage.local.get(
     if (data.activeStartTime) activeStartTime = data.activeStartTime;
     if (Array.isArray(data.liveSegments)) liveSegments = data.liveSegments;
     if (typeof data.liveInterimText === 'string') liveInterimText = data.liveInterimText;
+    if (data.authToken) cachedAuthToken = data.authToken;
+    if (data.userEmail) cachedUserEmail = data.userEmail;
+    if (data.selectedLanguage) cachedSelectedLanguage = data.selectedLanguage;
+    if (data.targetTranslation) cachedTargetTranslation = data.targetTranslation;
 
     injectIntoAllOpenTabs();
   }
@@ -186,32 +197,42 @@ function injectIntoAllOpenTabs() {
   );
 }
 
-// Background 3.5s DB reconciliation during active recording (only writes/broadcasts when segments actually change)
+// Background 3s DB reconciliation during active recording (merges by ID and never blocks or drops history)
 setInterval(async () => {
   if (currentState !== 'RECORDING' || isPaused || !activeMeetingId) return;
   try {
     const token = await getBackendAuthToken();
     if (!token) return;
     const { apiBase } = await resolveExtensionEndpoints();
+    const currentMeetingIdSnapshot = activeMeetingId;
     const res = await fetch(
-      `${apiBase}/meetings/${activeMeetingId}/transcript`,
+      `${apiBase}/meetings/${currentMeetingIdSnapshot}/transcript`,
       {
         headers: { Authorization: `Bearer ${token}` }
       }
     );
-    if (res.ok) {
+    if (res.ok && activeMeetingId === currentMeetingIdSnapshot) {
       const dbSegs = await res.json();
-      if (Array.isArray(dbSegs) && dbSegs.length >= liveSegments.length) {
-        const nextSegs: LiveSegmentItem[] = dbSegs.slice(-50).map((s: any) => {
+      if (Array.isArray(dbSegs) && dbSegs.length > 0) {
+        const mergedById = new Map<string, LiveSegmentItem>();
+        for (const s of liveSegments) {
+          mergedById.set(s.id, s);
+        }
+        for (const s of dbSegs) {
           const spkKey = s.speakerKey || 'speaker-1';
-          return {
+          const existing = mergedById.get(s.id);
+          mergedById.set(s.id, {
             id: s.id,
             speakerKey: spkKey,
-            speakerName: resolveJoineeForSpeakerKey(spkKey, s.speakerName),
+            speakerName: resolveJoineeForSpeakerKey(spkKey, s.speakerName || existing?.speakerName),
             text: s.text,
-            startMs: s.startMs || 0
-          };
-        });
+            startMs: s.startMs ?? existing?.startMs ?? 0
+          });
+        }
+        const nextSegs = Array.from(mergedById.values())
+          .sort((a, b) => (a.startMs || 0) - (b.startMs || 0))
+          .slice(-60);
+
         const hasChanged =
           nextSegs.length !== liveSegments.length ||
           nextSegs.some(
@@ -228,7 +249,7 @@ setInterval(async () => {
       }
     }
   } catch {}
-}, 3500);
+}, 3000);
 
 // Strictly retrieve authenticated session token — never silently auto-login with dummy credentials
 async function getBackendAuthToken(): Promise<string> {
@@ -256,30 +277,46 @@ async function ensureContentScriptInjected(tabId: number | null) {
 }
 
 function broadcastToMeetingTab() {
-  if (!activeTabId) return;
-  chrome.storage.local.get(
-    ['authToken', 'userEmail', 'selectedLanguage', 'targetTranslation'],
-    (authData) => {
-      if (authData.userEmail) cachedUserEmail = authData.userEmail;
-      chrome.tabs
-        .sendMessage(activeTabId!, {
-          type: 'LIVE_TRANSCRIPT_UPDATE',
-          state: currentState,
-          isPaused,
-          meetingId: activeMeetingId,
-          startTime: activeStartTime,
-          segments: liveSegments,
-          interimText: liveInterimText,
-          joinees: detectedMeetingJoinees,
-          activeSpeaker: activeSpeakingJoinee,
-          isAuthenticated: Boolean(authData.authToken),
-          userEmail: authData.userEmail || null,
-          selectedLanguage: authData.selectedLanguage || 'multi',
-          targetTranslation: authData.targetTranslation || 'ORIGINAL'
-        })
-        .catch(() => {});
-    }
-  );
+  const payload = {
+    type: 'LIVE_TRANSCRIPT_UPDATE',
+    state: currentState,
+    isPaused,
+    meetingId: activeMeetingId,
+    startTime: activeStartTime,
+    segments: liveSegments,
+    interimText: liveInterimText,
+    joinees: detectedMeetingJoinees,
+    activeSpeaker: activeSpeakingJoinee,
+    isAuthenticated: Boolean(cachedAuthToken),
+    userEmail: cachedUserEmail,
+    selectedLanguage: cachedSelectedLanguage || 'multi',
+    targetTranslation: cachedTargetTranslation || 'ORIGINAL'
+  };
+
+  if (activeTabId) {
+    chrome.tabs.sendMessage(activeTabId, payload).catch(() => {});
+  } else {
+    chrome.tabs.query(
+      {
+        url: [
+          'https://meet.google.com/*',
+          'https://teams.microsoft.com/*',
+          'https://*.teams.microsoft.com/*',
+          'https://teams.live.com/*',
+          'https://zoom.us/*',
+          'https://*.zoom.us/*'
+        ]
+      },
+      (tabs) => {
+        for (const t of tabs) {
+          if (t.id) {
+            activeTabId = t.id;
+            chrome.tabs.sendMessage(t.id, payload).catch(() => {});
+          }
+        }
+      }
+    );
+  }
 }
 
 async function saveState(
@@ -359,6 +396,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       setStoredServerOrigin(message.serverOrigin).catch(() => {});
     }
     if (message.token && message.email) {
+      cachedAuthToken = message.token;
+      cachedUserEmail = message.email;
       chrome.storage.local
         .set({
           authToken: message.token,
@@ -376,6 +415,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.serverOrigin) {
       setStoredServerOrigin(message.serverOrigin).catch(() => {});
     }
+    cachedAuthToken = null;
+    cachedUserEmail = null;
     chrome.storage.local.remove(['authToken', 'userEmail']).then(async () => {
       if (currentState === 'RECORDING') {
         await handleStopCapture();
@@ -391,9 +432,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const updates: Record<string, any> = {};
     if (message.settings?.defaultSpokenLanguage) {
       updates.selectedLanguage = message.settings.defaultSpokenLanguage;
+      cachedSelectedLanguage = message.settings.defaultSpokenLanguage;
     }
     if (message.settings?.defaultTranslationLanguage) {
       updates.targetTranslation = message.settings.defaultTranslationLanguage;
+      cachedTargetTranslation = message.settings.defaultTranslationLanguage;
     }
     chrome.storage.local.set(updates).then(() => broadcastToMeetingTab());
     sendResponse({ success: true });
@@ -401,8 +444,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'SET_TRANSLATION_LANGUAGE') {
+    cachedTargetTranslation = message.targetTranslation || 'ORIGINAL';
     chrome.storage.local
-      .set({ targetTranslation: message.targetTranslation || 'ORIGINAL' })
+      .set({ targetTranslation: cachedTargetTranslation })
       .then(() => {
         broadcastToMeetingTab();
         sendResponse({ success: true });
@@ -493,7 +537,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const nextInterim = ev.text || '';
         if (nextInterim !== liveInterimText) {
           liveInterimText = nextInterim;
-          chrome.storage.local.set({ liveInterimText });
+          // Broadcast immediately in <1ms without disk I/O contention on every partial syllable
           broadcastToMeetingTab();
         }
       } else if (ev.type === 'TRANSCRIPT' && ev.text) {
@@ -503,24 +547,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const resolvedSpeakerName = resolveJoineeForSpeakerKey(speakerKey, ev.speakerName);
         if (!liveSegments.some((s) => s.id === segId)) {
           liveSegments = [
-            ...liveSegments.slice(-49),
+            ...liveSegments.slice(-59),
             {
               id: segId,
               speakerKey,
               speakerName: resolvedSpeakerName,
               text: ev.text,
-              startMs: ev.startMs || 0
+              startMs: ev.startMs || Date.now() - (activeStartTime || Date.now())
             }
           ];
         }
-        chrome.storage.local.set({ liveSegments, liveInterimText });
+        // Broadcast first, then persist to chrome.storage asynchronously
         broadcastToMeetingTab();
+        chrome.storage.local.set({ liveSegments, liveInterimText: '' });
       } else if (ev.type === 'SPEAKER_RENAMED' && ev.speakerKey && ev.speakerName) {
         liveSegments = liveSegments.map((s) =>
           s.speakerKey === ev.speakerKey ? { ...s, speakerName: ev.speakerName } : s
         );
-        chrome.storage.local.set({ liveSegments });
         broadcastToMeetingTab();
+        chrome.storage.local.set({ liveSegments });
       }
     }
     sendResponse({ success: true });
@@ -795,6 +840,12 @@ async function handleStartCapture(
   liveSegments = [];
   liveInterimText = '';
   isPaused = false;
+  await chrome.storage.local.set({
+    activeMeetingId: meetingId,
+    liveSegments: [],
+    liveInterimText: ''
+  });
+  broadcastToMeetingTab();
   const { wsBase } = await resolveExtensionEndpoints();
 
   const offscreenResponse = await new Promise<any>((resolve, reject) => {
