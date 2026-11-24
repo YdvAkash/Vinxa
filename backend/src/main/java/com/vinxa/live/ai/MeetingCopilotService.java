@@ -237,33 +237,29 @@ public class MeetingCopilotService {
             String modelName
     ) throws Exception {
         String prompt = """
-                You are the Vinxa Live AI Meeting Copilot — an enterprise meeting intelligence assistant.
-                The user is asking a question across their recorded meetings stored in Neon Cloud PostgreSQL.
+                You are the Vinxa Live AI Meeting Assistant.
+                Answer the user's question clearly and directly with a well-written explanation based on the meeting knowledge base below.
                 
                 STRICT RULES:
-                1. Base your answer STRICTLY on the provided MEETING KNOWLEDGE BASE below (transcripts, summaries, decisions, and action items).
-                2. Mention specific meeting titles, speaker names, dates, decisions, and assignees when relevant.
-                3. Format your `answer` cleanly using Markdown (bullet points, bold key terms) for readability.
-                4. Provide verifiable `citations` referencing real `meetingId`, `meetingTitle`, `meetingDate`, `segmentId` (use null if citing summary-level data without a specific segment UUID), `speaker`, and `quote` from the knowledge base.
-                5. Provide 3 relevant, smart `suggestedFollowUps` questions the user might want to ask next based on these meetings.
-                6. Return valid JSON ONLY with keys:
-                   - "answer" (string)
+                1. Give ONLY the clear answer and explanation — do NOT include raw segment UUIDs, proof tags, citation blocks, or database metadata in your response.
+                2. Explain the context clearly so the user understands what was discussed, why decisions were made, and who is responsible for any relevant tasks.
+                3. Use clean, natural prose (and simple bullet points only when listing multiple items).
+                4. Return valid JSON ONLY with keys:
+                   - "answer" (string: your clear, complete explanation answering the user's question)
                    - "confidence" ("HIGH" | "MEDIUM" | "LOW")
-                   - "citations" (array of { "meetingId": UUID, "meetingTitle": string, "meetingDate": string, "segmentId": UUID or null, "speaker": string, "quote": string })
-                   - "suggestedFollowUps" (array of 3 strings)
+                   - "citations" (empty array [])
+                   - "suggestedFollowUps" (empty array [])
                 
                 CONVERSATION HISTORY:
                 %s
                 
-                MEETING KNOWLEDGE BASE (%d meetings, %d transcript segments):
+                MEETING KNOWLEDGE BASE:
                 %s
                 
                 USER QUESTION:
                 %s
                 """.formatted(
                 historyText.isEmpty() ? "(None)" : historyText,
-                meetingsCount,
-                segmentsCount,
                 knowledgeContext,
                 question
         );
@@ -307,58 +303,16 @@ public class MeetingCopilotService {
             rawJson = rawJson.trim();
 
             JsonNode parsed = objectMapper.readTree(rawJson);
-            String answer = parsed.path("answer").asText("");
+            String answer = parsed.path("answer").asText("").trim();
             String confidence = parsed.path("confidence").asText("HIGH").toUpperCase();
-
-            List<CopilotAskResponse.CitationDto> citations = new ArrayList<>();
-            JsonNode citationsNode = parsed.path("citations");
-            if (citationsNode.isArray()) {
-                for (JsonNode c : citationsNode) {
-                    try {
-                        UUID mId = c.hasNonNull("meetingId") && !c.path("meetingId").asText().isBlank()
-                                ? UUID.fromString(c.path("meetingId").asText())
-                                : null;
-                        UUID sId = c.hasNonNull("segmentId") && !c.path("segmentId").asText().isBlank()
-                                ? UUID.fromString(c.path("segmentId").asText())
-                                : null;
-                        if (mId != null) {
-                            citations.add(new CopilotAskResponse.CitationDto(
-                                    mId,
-                                    c.path("meetingTitle").asText("Meeting Session"),
-                                    c.path("meetingDate").asText(""),
-                                    sId,
-                                    c.path("speaker").asText("Speaker"),
-                                    c.path("quote").asText("")
-                            ));
-                        }
-                    } catch (Exception ignored) {
-                    }
-                }
-            }
-
-            List<String> followUps = new ArrayList<>();
-            JsonNode followUpsNode = parsed.path("suggestedFollowUps");
-            if (followUpsNode.isArray()) {
-                for (JsonNode f : followUpsNode) {
-                    String fText = f.asText("").trim();
-                    if (!fText.isEmpty()) followUps.add(fText);
-                }
-            }
-            if (followUps.isEmpty()) {
-                followUps = List.of(
-                        "What are the highest priority action items from these meetings?",
-                        "What key decisions were confirmed?",
-                        "Are there any open questions that still need follow-up?"
-                );
-            }
 
             return new CopilotAskResponse(
                     answer,
                     confidence,
                     meetingsCount,
                     segmentsCount,
-                    citations,
-                    followUps
+                    List.of(),
+                    List.of()
             );
         } else {
             throw new RuntimeException("Gemini API status " + response.statusCode());
@@ -373,43 +327,31 @@ public class MeetingCopilotService {
             List<ActionItem> allActions,
             Map<UUID, MeetingSummary> summaryByMeeting
     ) {
-        String qLower = question.toLowerCase();
         StringBuilder answer = new StringBuilder();
-        List<CopilotAskResponse.CitationDto> matchedCitations = new ArrayList<>();
-
-        // Filter citations matching keywords in question
-        String[] keywords = qLower.replaceAll("[^a-z0-9\\s]", "").split("\\s+");
-        for (CopilotAskResponse.CitationDto c : allCitations) {
-            String quoteLower = c.quote().toLowerCase();
-            for (String kw : keywords) {
-                if (kw.length() > 3 && quoteLower.contains(kw)) {
-                    matchedCitations.add(c);
-                    break;
-                }
-            }
-            if (matchedCitations.size() >= 4) break;
-        }
-        if (matchedCitations.isEmpty() && !allCitations.isEmpty()) {
-            matchedCitations.addAll(allCitations.subList(0, Math.min(3, allCitations.size())));
-        }
-
-        answer.append("Based on your **").append(meetings.size()).append(" recorded meeting(s)** in Neon PostgreSQL:\n\n");
 
         for (Meeting m : meetings) {
-            answer.append("### 📌 ").append(m.getTitle()).append(" (").append(m.getPlatform()).append(")\n");
             MeetingSummary sum = summaryByMeeting.get(m.getId());
             if (sum != null && sum.getSummary() != null) {
                 try {
                     JsonNode sumNode = objectMapper.readTree(sum.getSummary());
-                    String overview = sumNode.path("overview").asText("");
+                    String overview = sumNode.path("overview").asText("").trim();
                     if (!overview.isEmpty()) {
-                        answer.append("- **Overview:** ").append(overview).append("\n");
+                        answer.append(overview).append("\n\n");
                     }
                     JsonNode decisions = sumNode.path("decisions");
                     if (decisions.isArray() && !decisions.isEmpty()) {
                         for (JsonNode d : decisions) {
-                            answer.append("- **Confirmed Decision:** ").append(d.path("decision").asText()).append("\n");
+                            String decText = d.path("decision").asText("").trim();
+                            String reasonText = d.path("reason").asText("").trim();
+                            if (!decText.isEmpty()) {
+                                answer.append("• ").append(decText);
+                                if (!reasonText.isEmpty()) {
+                                    answer.append(" — ").append(reasonText);
+                                }
+                                answer.append("\n");
+                            }
                         }
+                        answer.append("\n");
                     }
                 } catch (Exception ignored) {
                 }
@@ -417,25 +359,35 @@ public class MeetingCopilotService {
         }
 
         if (!allActions.isEmpty()) {
-            answer.append("\n### ✅ Extracted Action Items\n");
+            answer.append("Key tasks and responsibilities identified:\n");
             for (ActionItem ai : allActions) {
-                answer.append("- **").append(ai.getTitle()).append("** — Assigned to: `")
-                        .append(ai.getAssignee() != null ? ai.getAssignee() : "Team")
-                        .append("` (Priority: **").append(ai.getPriority()).append("**, Status: `").append(ai.getStatus()).append("`)\n");
+                answer.append("• ").append(ai.getTitle());
+                if (ai.getAssignee() != null && !ai.getAssignee().isBlank()) {
+                    answer.append(" (Owner: ").append(ai.getAssignee()).append(")");
+                }
+                answer.append("\n");
             }
         }
 
+        if (answer.isEmpty() && !allCitations.isEmpty()) {
+            answer.append("In the meeting discussion, participants covered the following points:\n");
+            for (int i = 0; i < Math.min(5, allCitations.size()); i++) {
+                CopilotAskResponse.CitationDto c = allCitations.get(i);
+                answer.append("• ").append(c.speaker()).append(" explained: ").append(c.quote()).append("\n");
+            }
+        }
+
+        if (answer.isEmpty()) {
+            answer.append("No detailed discussion or decisions have been recorded for this question yet.");
+        }
+
         return new CopilotAskResponse(
-                answer.toString(),
+                answer.toString().trim(),
                 "HIGH",
                 meetings.size(),
                 totalSegmentsCount,
-                matchedCitations,
-                List.of(
-                        "What action items are still open?",
-                        "What were the confirmed decisions and their reasons?",
-                        "Summarize the key points from the latest meeting."
-                )
+                List.of(),
+                List.of()
         );
     }
 

@@ -122,12 +122,18 @@ class AiSummaryAndBatchPerformanceTest {
         verify(actionItemRepository, atLeastOnce()).save(actionCaptor.capture());
 
         ActionItem savedAction = actionCaptor.getValue();
+        assertTrue(savedAction.getTitle().startsWith("[TASK]"), "Action item must be formatted as a Jira task");
         assertTrue(savedAction.getTitle().contains("Flyway V2 migration"));
         assertEquals("Priya", savedAction.getAssignee());
         assertEquals("HIGH", savedAction.getPriority());
         assertNotNull(savedAction.getDeadline(), "Extracted ISO date 2026-12-01 must be parsed into a non-null deadline");
         assertEquals("2026-12-01", savedAction.getDeadline().toLocalDate().toString());
         assertEquals(seg2Id.toString(), savedAction.getEvidenceSegmentIds());
+
+        AiSummaryResponse synth = aiSummaryService.synthesizeTranscriptGroundedAnalysis(meeting, segments);
+        int wordCount = AiSummaryService.countWords(synth.overview());
+        assertTrue(wordCount >= 100 && wordCount <= 1000,
+                "Summary overview must be between 100 and 1000 words (was " + wordCount + " words)");
 
         assertEquals(MeetingStatus.ANALYSIS_COMPLETED, meeting.getStatus());
         assertFalse(MeetingService.isGenericOrCodeOnlyTitle(meeting.getTitle()), "Meeting title must be auto-upgraded from transcript");

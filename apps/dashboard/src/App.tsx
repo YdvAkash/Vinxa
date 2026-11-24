@@ -11,6 +11,7 @@ import { AuthPage } from './pages/AuthPage';
 import { PublicSharedMeetingPage } from './pages/PublicSharedMeetingPage';
 import { api } from './services/api';
 import { Meeting, AuthUser, ActionItem, WebhookDispatchResult } from './types';
+import { parseJiraTaskDetails } from './components/meetings/ActionItemsView';
 import { CheckSquare, Square, ArrowUpRight, Send, Check } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -416,18 +417,19 @@ export const App: React.FC = () => {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {globalActionItems.map(({ meeting, item }) => {
+                        {globalActionItems.map(({ meeting, item }, idx) => {
                           const isDone = (item.status || '').toUpperCase() === 'DONE';
+                          const jira = parseJiraTaskDetails(item.task || item.title || 'Action Item', idx);
                           return (
                             <div
                               key={item.id}
-                              className={`p-4 rounded-2xl bg-white border transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs ${
+                              className={`p-4 sm:p-5 rounded-2xl bg-white border transition flex flex-col sm:flex-row sm:items-start justify-between gap-4 shadow-2xs ${
                                 isDone
                                   ? 'border-slate-200/60 opacity-65'
                                   : 'border-slate-200/90 hover:border-violet-300'
                               }`}
                             >
-                              <div className="flex items-start space-x-3">
+                              <div className="flex items-start space-x-3.5 flex-1 min-w-0">
                                 <button
                                   type="button"
                                   onClick={() => handleToggleGlobalAction(meeting.id, item.id)}
@@ -441,24 +443,47 @@ export const App: React.FC = () => {
                                     <Square className="w-4 h-4" />
                                   )}
                                 </button>
-                                <div>
+                                <div className="flex-1 min-w-0 space-y-1.5">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[11px] font-bold">
+                                      <span>☑</span>
+                                      <span>{jira.ticketKey}</span>
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 border border-violet-200 text-[10px] font-extrabold uppercase tracking-wider">
+                                      {jira.issueType}
+                                    </span>
+                                    <span
+                                      className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider border ${
+                                        isDone
+                                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                          : 'bg-slate-100 text-slate-700 border-slate-200'
+                                      }`}
+                                    >
+                                      {isDone ? 'DONE' : 'TO DO'}
+                                    </span>
+                                    <span className="font-semibold text-xs text-violet-700">
+                                      {meeting.title}
+                                    </span>
+                                  </div>
                                   <p
-                                    className={`text-sm font-bold ${
+                                    className={`text-sm sm:text-base font-extrabold ${
                                       isDone ? 'line-through text-slate-400' : 'text-slate-900'
                                     }`}
                                   >
-                                    {item.task || item.title}
+                                    {jira.summary}
                                   </p>
-                                  <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-500 mt-1">
-                                    <span className="font-semibold text-violet-700">
-                                      {meeting.title}
+                                  <p className="text-xs text-slate-600 leading-relaxed">
+                                    <strong className="text-slate-800">Deliverable: </strong>
+                                    {jira.acceptanceCriteria}
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 pt-0.5">
+                                    <span>
+                                      Assignee: <strong className="text-slate-800">{item.assignee || 'Unassigned'}</strong>
                                     </span>
-                                    {item.assignee && (
-                                      <>
-                                        <span>·</span>
-                                        <span>Owner: {item.assignee}</span>
-                                      </>
-                                    )}
+                                    <span>·</span>
+                                    <span>
+                                      Priority: <strong className="text-slate-800">{item.priority || 'MEDIUM'}</strong>
+                                    </span>
                                     {item.deadline && (
                                       <>
                                         <span>·</span>
