@@ -46,6 +46,18 @@ let liveSegments: LiveSegmentItem[] = [];
 let liveInterimText: string = '';
 let detectedMeetingJoinees: string[] = [];
 let activeSpeakingJoinee: string | null = null;
+let cachedUserEmail: string | null = null;
+
+function deriveNameFromEmail(email?: string | null): string | null {
+  if (!email || !email.includes('@')) return null;
+  const local = email.split('@')[0].replace(/\d+$/, '');
+  const parts = local
+    .split(/[._-]+/)
+    .map((p) => p.replace(/[^a-zA-Z]/g, '').trim())
+    .filter((p) => p.length >= 2 && p.toLowerCase() !== 'user' && p.toLowerCase() !== 'test');
+  if (parts.length === 0) return null;
+  return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+}
 
 function isGenericSpeakerLabel(name?: string | null): boolean {
   if (!name) return true;
@@ -53,7 +65,8 @@ function isGenericSpeakerLabel(name?: string | null): boolean {
   return (
     trimmed.length === 0 ||
     /^speaker(?:\s*[-_]?\s*\d+)?$/i.test(trimmed) ||
-    /^participant(?:\s*\d+)?$/i.test(trimmed)
+    /^participant(?:\s*\d+)?$/i.test(trimmed) ||
+    /^you$/i.test(trimmed)
   );
 }
 
@@ -63,7 +76,10 @@ function resolveJoineeForSpeakerKey(speakerKey: string, currentName?: string | n
   }
   if (activeSpeakingJoinee && !isGenericSpeakerLabel(activeSpeakingJoinee)) {
     const usedByOther = liveSegments.some(
-      (s) => s.speakerKey !== speakerKey && s.speakerName.toLowerCase() === activeSpeakingJoinee!.toLowerCase()
+      (s) =>
+        s.speakerKey !== speakerKey &&
+        !isGenericSpeakerLabel(s.speakerName) &&
+        s.speakerName.toLowerCase() === activeSpeakingJoinee!.toLowerCase()
     );
     if (!usedByOther) {
       return activeSpeakingJoinee;
@@ -77,11 +93,29 @@ function resolveJoineeForSpeakerKey(speakerKey: string, currentName?: string | n
     }
     return detectedMeetingJoinees[0];
   }
+  const emailFallback = deriveNameFromEmail(cachedUserEmail);
+  if (emailFallback && (speakerKey === 'speaker-1' || !speakerKey)) {
+    return emailFallback;
+  }
   return currentName || 'Speaker 1';
 }
 
 async function pushJoineesToBackend(meetingId: string | null, joinees: string[], activeSpeaker: string | null) {
-  if (!meetingId || (joinees.length === 0 && !activeSpeaker)) return;
+  const effectiveJoinees = [...joinees];
+  if (effectiveJoinees.length === 0 && cachedUserEmail) {
+    const fallback = deriveNameFromEmail(cachedUserEmail);
+    if (fallback) effectiveJoinees.push(fallback);
+  }
+  if (effectiveJoinees.length > 0 || activeSpeaker) {
+    chrome.runtime
+      .sendMessage({
+        type: 'SYNC_OFFSCREEN_JOINEES',
+        joinees: effectiveJoinees,
+        activeSpeaker
+      })
+      .catch(() => {});
+  }
+  if (!meetingId || (effectiveJoinees.length === 0 && !activeSpeaker)) return;
   try {
     const token = await getBackendAuthToken();
     if (!token) return;
@@ -92,7 +126,7 @@ async function pushJoineesToBackend(meetingId: string | null, joinees: string[],
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({ joinees, activeSpeaker })
+      body: JSON.stringify({ joinees: effectiveJoinees, activeSpeaker })
     });
   } catch {}
 }
@@ -168,13 +202,16 @@ setInterval(async () => {
     if (res.ok) {
       const dbSegs = await res.json();
       if (Array.isArray(dbSegs) && dbSegs.length >= liveSegments.length) {
-        const nextSegs: LiveSegmentItem[] = dbSegs.slice(-50).map((s: any) => ({
-          id: s.id,
-          speakerKey: s.speakerKey || 'speaker-1',
-          speakerName: s.speakerName || 'Speaker 1',
-          text: s.text,
-          startMs: s.startMs || 0
-        }));
+        const nextSegs: LiveSegmentItem[] = dbSegs.slice(-50).map((s: any) => {
+          const spkKey = s.speakerKey || 'speaker-1';
+          return {
+            id: s.id,
+            speakerKey: spkKey,
+            speakerName: resolveJoineeForSpeakerKey(spkKey, s.speakerName),
+            text: s.text,
+            startMs: s.startMs || 0
+          };
+        });
         const hasChanged =
           nextSegs.length !== liveSegments.length ||
           nextSegs.some(
@@ -223,6 +260,7 @@ function broadcastToMeetingTab() {
   chrome.storage.local.get(
     ['authToken', 'userEmail', 'selectedLanguage', 'targetTranslation'],
     (authData) => {
+      if (authData.userEmail) cachedUserEmail = authData.userEmail;
       chrome.tabs
         .sendMessage(activeTabId!, {
           type: 'LIVE_TRANSCRIPT_UPDATE',
@@ -232,6 +270,8 @@ function broadcastToMeetingTab() {
           startTime: activeStartTime,
           segments: liveSegments,
           interimText: liveInterimText,
+          joinees: detectedMeetingJoinees,
+          activeSpeaker: activeSpeakingJoinee,
           isAuthenticated: Boolean(authData.authToken),
           userEmail: authData.userEmail || null,
           selectedLanguage: authData.selectedLanguage || 'multi',

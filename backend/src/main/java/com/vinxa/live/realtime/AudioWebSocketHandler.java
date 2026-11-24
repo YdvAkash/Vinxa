@@ -326,7 +326,9 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             // Warm speaker display name cache, seed host joinee name, and transition meeting status asynchronously
             CompletableFuture.runAsync(() -> {
                 try {
-                    Meeting meeting = meetingRepository.findById(meetingId).orElse(null);
+                    Meeting meeting = meetingRepository.findByIdWithUser(meetingId)
+                            .or(() -> meetingRepository.findById(meetingId))
+                            .orElse(null);
                     if (meeting != null) {
                         if (!MeetingService.isGenericOrCodeOnlyTitle(meeting.getTitle())) {
                             meetingTitleResolved.put(meetingId, true);

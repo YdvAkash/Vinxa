@@ -41,6 +41,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     isPaused = false;
     sendResponse({ success: true, isPaused: false });
     return true;
+  } else if (message.type === 'SYNC_OFFSCREEN_JOINEES') {
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+      try {
+        websocket.send(
+          JSON.stringify({
+            type: 'SYNC_JOINEES',
+            joinees: message.joinees || [],
+            activeSpeaker: message.activeSpeaker || null
+          })
+        );
+      } catch {}
+    }
+    sendResponse({ success: true });
+    return true;
   } else if (message.type === 'STOP_OFFSCREEN_CAPTURE') {
     isPaused = false;
     isStopping = true;

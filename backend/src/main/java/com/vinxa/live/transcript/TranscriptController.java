@@ -292,12 +292,13 @@ public class TranscriptController {
     }
 
     @PostMapping("/joinees")
+    @org.springframework.transaction.annotation.Transactional
     public ResponseEntity<Map<String, Object>> syncMeetingJoinees(
             @PathVariable("id") UUID meetingId,
             @RequestBody Map<String, Object> body
     ) {
         User user = SecurityUtils.getCurrentUser();
-        meetingService.getMeetingAndVerifyOwnership(user, meetingId);
+        Meeting meeting = meetingService.getMeetingAndVerifyOwnership(user, meetingId);
 
         List<String> joinees = new java.util.ArrayList<>();
         Object rawList = body != null ? body.get("joinees") : null;
@@ -321,6 +322,21 @@ public class TranscriptController {
         Map<String, String> assigned = audioWebSocketHandler != null
                 ? audioWebSocketHandler.syncMeetingJoinees(meetingId, joinees, activeSpeaker)
                 : Map.of();
+
+        // Synchronously persist assigned joinee names into Participant entities in PostgreSQL
+        // so immediate GET /transcript queries return the resolved joinee names
+        for (Map.Entry<String, String> entry : assigned.entrySet()) {
+            String spkKey = entry.getKey();
+            String spkName = entry.getValue();
+            if (spkKey != null && spkName != null && !com.vinxa.live.realtime.AudioWebSocketHandler.isGenericSpeakerLabel(spkName)) {
+                Participant p = participantRepository.findByMeetingIdAndSpeakerKey(meetingId, spkKey)
+                        .orElseGet(() -> new Participant(UUID.randomUUID(), meeting, spkKey, spkName));
+                if (!spkName.equals(p.getDisplayName())) {
+                    p.setDisplayName(spkName);
+                }
+                participantRepository.save(p);
+            }
+        }
 
         return ResponseEntity.ok(Map.of(
                 "meetingId", meetingId.toString(),

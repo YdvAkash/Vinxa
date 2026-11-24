@@ -191,6 +191,42 @@
   let detectedJoinees: string[] = [];
   let activeSpeakingJoinee: string | null = null;
   let lastJoineeSyncSignature = '';
+  let currentUserEmail: string | null = null;
+
+  function deriveNameFromEmail(email?: string | null): string | null {
+    if (!email || !email.includes('@')) return null;
+    const local = email.split('@')[0].replace(/\d+$/, '');
+    const parts = local
+      .split(/[._-]+/)
+      .map((p) => p.replace(/[^a-zA-Z]/g, '').trim())
+      .filter((p) => p.length >= 2 && p.toLowerCase() !== 'user' && p.toLowerCase() !== 'test');
+    if (parts.length === 0) return null;
+    return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+  }
+
+  function detectLocalUserDisplayNameFromPage(): string | null {
+    try {
+      // 1. Check Google Account badge aria-label: "Google Account: Full Name (email@gmail.com)"
+      const acctEl = document.querySelector<HTMLElement>('[aria-label*="Google Account:" i]');
+      if (acctEl) {
+        const label = acctEl.getAttribute('aria-label') || '';
+        const m = label.match(/Google Account:\s*([^(\n\r]+)/i);
+        if (m && m[1]?.trim()) return m[1].trim();
+      }
+      // 2. Check Google Meet / Workspace profile scripts (AF_initDataCallback / WIZ_global_data)
+      const scripts = document.querySelectorAll('script');
+      for (let i = 0; i < Math.min(scripts.length, 40); i++) {
+        const txt = scripts[i].textContent || '';
+        if (txt.includes('@') && (txt.includes('WIZ_global_data') || txt.includes('ds:1'))) {
+          const nameEmailMatch = txt.match(/"([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})"\s*,\s*"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+"/);
+          if (nameEmailMatch && nameEmailMatch[1]) {
+            return nameEmailMatch[1].trim();
+          }
+        }
+      }
+    } catch {}
+    return deriveNameFromEmail(currentUserEmail);
+  }
 
   const IGNORED_UI_LABELS = new Set([
     'you',
@@ -284,37 +320,75 @@
     };
 
     try {
-      // 1. Google Meet Participant Tiles & Roster Selectors
-      const meetTiles = document.querySelectorAll<HTMLElement>('[data-participant-id], [data-self-name]');
+      const localSelfName = detectLocalUserDisplayNameFromPage();
+
+      // 1. Google Meet Action Buttons with Exact Participant Names in aria-label
+      // e.g. "More options for Akash Yadav", "Pin Akash Yadav to your main screen", "Mute Akash Yadav"
+      const ariaButtons = document.querySelectorAll<HTMLElement>(
+        '[aria-label^="More options for " i], [aria-label^="Pin " i], [aria-label^="Unpin " i]'
+      );
+      ariaButtons.forEach((btn) => {
+        const label = btn.getAttribute('aria-label') || '';
+        let extracted: string | null = null;
+        const moreMatch = label.match(/^More options for\s+(.+)$/i);
+        if (moreMatch) extracted = moreMatch[1];
+        const pinMatch = label.match(/^(?:Pin|Unpin)\s+(.+?)(?:\s+to your|\s+from your|$)/i);
+        if (pinMatch && !/^yourself$/i.test(pinMatch[1].trim())) extracted = pinMatch[1];
+        if (extracted) addCandidate(extracted);
+      });
+
+      // 2. Google Meet Participant Tiles & Roster Selectors
+      const meetTiles = document.querySelectorAll<HTMLElement>('[data-participant-id], [data-self-name], [data-requested-participant-id]');
       meetTiles.forEach((tile) => {
         if (tile.id === 'vinxa-live-hud-host') return;
-        const selfName = tile.getAttribute('data-self-name');
-        if (selfName) addCandidate(selfName);
+        const selfNameAttr = tile.getAttribute('data-self-name');
+        if (selfNameAttr) {
+          if (/^you$/i.test(selfNameAttr.trim()) && localSelfName) {
+            addCandidate(localSelfName);
+          } else {
+            addCandidate(selfNameAttr);
+          }
+        }
 
-        const nameEl = tile.querySelector<HTMLElement>('.zWGUib, .cS7aqe, .dwSJ2e, .N2K3jd');
+        const nameEls = tile.querySelectorAll<HTMLElement>(
+          '.zWGUib, .cS7aqe, .dwSJ2e, .N2K3jd, .Xe1pe, .K4efff, .ZY8hPc, span.notranslate, [dir="auto"]'
+        );
         const speakingIndicator = tile.querySelector<HTMLElement>('.gjg47c, .IisKdb, .S7urwe');
         const isTileSpeaking = Boolean(
           speakingIndicator &&
             speakingIndicator.offsetParent !== null &&
             window.getComputedStyle(speakingIndicator).display !== 'none'
         );
-        if (nameEl?.textContent) {
-          addCandidate(nameEl.textContent, isTileSpeaking);
-        }
+
+        nameEls.forEach((nameEl) => {
+          const rawText = (nameEl.textContent || '').trim();
+          if (/^you$/i.test(rawText) && localSelfName) {
+            addCandidate(localSelfName, isTileSpeaking);
+          } else if (rawText) {
+            addCandidate(rawText, isTileSpeaking);
+          }
+        });
       });
 
       const meetNameBadges = document.querySelectorAll<HTMLElement>(
-        '.zWGUib, .VfPpkd-StrnGf-rymPhb-b9t22c, .cS7aqe'
+        '.zWGUib, .VfPpkd-StrnGf-rymPhb-b9t22c, .cS7aqe, .Xe1pe, [role="listitem"][aria-label]'
       );
-      meetNameBadges.forEach((el) => addCandidate(el.textContent));
+      meetNameBadges.forEach((el) => {
+        const raw = el.getAttribute('aria-label') || el.textContent || '';
+        if (/^you$/i.test(raw.trim()) && localSelfName) {
+          addCandidate(localSelfName);
+        } else {
+          addCandidate(raw);
+        }
+      });
 
-      // 2. Microsoft Teams Web Participant Tiles & Roster Selectors
+      // 3. Microsoft Teams Web Participant Tiles & Roster Selectors
       const teamsEls = document.querySelectorAll<HTMLElement>(
-        '[data-tid="ts-roster-item-title"], [data-tid="calling-participant-stream"] [dir="auto"], [data-cid="calling-participant-stream"] [dir="auto"], .ui-chat__message__author'
+        '[data-tid="ts-roster-item-title"], [data-tid="calling-participant-stream"] [dir="auto"], [data-cid="calling-participant-stream"] [dir="auto"], [data-tid*="participant"] [dir="auto"], .ui-chat__message__author'
       );
       teamsEls.forEach((el) => addCandidate(el.textContent));
 
-      // 3. Zoom Web Client Participant Tiles & Roster Selectors
+      // 4. Zoom Web Client Participant Tiles & Roster Selectors
       const zoomActive = document.querySelector<HTMLElement>(
         '.speaker-active-container .video-avatar__avatar-name, .active-speaker .video-avatar__avatar-name'
       );
@@ -325,6 +399,11 @@
         '.video-avatar__avatar-name, .participants-item__display-name'
       );
       zoomEls.forEach((el) => addCandidate(el.textContent));
+
+      // 5. Fallback: if no other tiles matched yet and we have localSelfName, include localSelfName
+      if (foundNames.length === 0 && localSelfName) {
+        addCandidate(localSelfName);
+      }
     } catch {
       // Ignore transient DOM query errors
     }
@@ -1341,6 +1420,10 @@
       activeMeetingId = msg.meetingId || activeMeetingId;
       startTime = msg.startTime || startTime;
       if (typeof msg.isAuthenticated === 'boolean') isAuthenticated = msg.isAuthenticated;
+      if (msg.userEmail) currentUserEmail = msg.userEmail;
+      if (Array.isArray(msg.joinees) && msg.joinees.length > 0 && detectedJoinees.length === 0) {
+        detectedJoinees = msg.joinees;
+      }
       if (Array.isArray(msg.segments)) segments = msg.segments;
       if (typeof msg.interimText === 'string') interimText = msg.interimText;
       if (msg.selectedLanguage) {
@@ -1414,6 +1497,7 @@
       activeMeetingId = res.meetingId || null;
       startTime = res.startTime || null;
       isAuthenticated = Boolean(res.isAuthenticated);
+      if (res.userEmail) currentUserEmail = res.userEmail;
       if (Array.isArray(res.segments)) segments = res.segments;
       if (typeof res.interimText === 'string') interimText = res.interimText;
       if (res.selectedLanguage) {
