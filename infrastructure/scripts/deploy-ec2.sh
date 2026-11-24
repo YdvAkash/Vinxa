@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Vinxa Live ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â AWS EC2 Automated Continuous Deployment Script
+# Vinxa Live ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â AWS EC2 Automated Continuous Deployment Script
 # ==============================================================================
 # Executed by the GitHub Actions CD pipeline (or manually on EC2) after
 # ec2-preflight-setup.sh has verified/installed all prerequisites.
@@ -29,7 +29,7 @@ log_warn()  { echo -e "\033[1;33m[DEPLOY-WARN]\033[0m  $*"; }
 log_error() { echo -e "\033[1;31m[DEPLOY-ERROR]\033[0m $*" >&2; }
 
 echo "=============================================================================="
-echo " Vinxa Live ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Starting CD Deployment on AWS EC2"
+echo " Vinxa Live ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Starting CD Deployment on AWS EC2"
 echo " Mode        : ${DEPLOY_MODE}"
 echo " App Dir     : ${APP_DIR}"
 echo " Timestamp   : ${TIMESTAMP}"
@@ -49,36 +49,42 @@ fi
 ENV_FILE="${APP_DIR}/.env"
 log_info "Configuring runtime environment variables at ${ENV_FILE}..."
 
-# Preserve existing .env if no new variables were injected via CI environment
-if [ ! -f "${ENV_FILE}" ]; then
-    touch "${ENV_FILE}"
+DEFAULT_JDBC_URL="jdbc:postgresql://ep-still-leaf-bevsok4d-pooler.c-9.us-east-2.aws.neon.tech:5432/neondb?sslmode=require&prepareThreshold=0"
+RAW_DB_URL="${SPRING_DATASOURCE_URL:-${DEFAULT_JDBC_URL}}"
+
+# Sanitize SPRING_DATASOURCE_URL if a libpq/Node URI (postgresql://user:pass@host/db) was provided:
+# PostgreSQL JDBC driver throws NumberFormatException (Integer.parseInt) if user:pass@ is present in the URL.
+CLEAN_DB_URL="$(echo "${RAW_DB_URL}" | sed -E 's|^postgres(ql)?://|jdbc:postgresql://|; s|^(jdbc:postgresql://)[^/@]+@|\1|')"
+
+# Ensure explicit numeric port :5432 is present in the JDBC host segment
+if ! echo "${CLEAN_DB_URL}" | grep -Eq '^jdbc:postgresql://[^/:]+:[0-9]+/'; then
+    CLEAN_DB_URL="$(echo "${CLEAN_DB_URL}" | sed -E 's|^(jdbc:postgresql://[^/:]+)/|\1:5432/|')"
 fi
 
-chmod 600 "${ENV_FILE}"
-
-update_env_var() {
-    local key="$1"
-    local val="$2"
-    if [ -n "${val}" ]; then
-        if grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
-            sed -i "s|^${key}=.*|${key}=${val}|" "${ENV_FILE}"
-        else
-            echo "${key}=${val}" >> "${ENV_FILE}"
-        fi
+# Ensure prepareThreshold=0 is set for Neon PgBouncer pooler compatibility
+if echo "${CLEAN_DB_URL}" | grep -q "pooler" && ! echo "${CLEAN_DB_URL}" | grep -q "prepareThreshold=0"; then
+    if echo "${CLEAN_DB_URL}" | grep -q "?"; then
+        CLEAN_DB_URL="${CLEAN_DB_URL}&prepareThreshold=0"
+    else
+        CLEAN_DB_URL="${CLEAN_DB_URL}?prepareThreshold=0"
     fi
-}
+fi
 
-update_env_var "SERVER_PORT" "${BACKEND_PORT}"
-update_env_var "SPRING_PROFILES_ACTIVE" "${SPRING_PROFILES_ACTIVE:-prod}"
-update_env_var "SPRING_DATASOURCE_URL" "${SPRING_DATASOURCE_URL:-}"
-update_env_var "SPRING_DATASOURCE_USERNAME" "${SPRING_DATASOURCE_USERNAME:-}"
-update_env_var "SPRING_DATASOURCE_PASSWORD" "${SPRING_DATASOURCE_PASSWORD:-}"
-update_env_var "JWT_SECRET" "${JWT_SECRET:-}"
-update_env_var "DEEPGRAM_API_KEY" "${DEEPGRAM_API_KEY:-}"
-update_env_var "GEMINI_API_KEY" "${GEMINI_API_KEY:-}"
-update_env_var "GEMINI_MODEL" "${GEMINI_MODEL:-gemini-flash-lite-latest}"
+cat > "${ENV_FILE}" <<EOF
+SERVER_PORT=${BACKEND_PORT}
+SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-prod}
+SPRING_DATASOURCE_URL=${CLEAN_DB_URL}
+SPRING_DATASOURCE_USERNAME=${SPRING_DATASOURCE_USERNAME:-neondb_owner}
+SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD:-npg_TmqHZps7oQb3}
+JWT_SECRET=${JWT_SECRET:-404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-e021ff3eee8696d392fe3ef7ca929ddcc8c076db}
+GEMINI_API_KEY=${GEMINI_API_KEY:-AQ.Ab8RN6Jsm5QfEi5vlcX0XBhXRAg97s1J_8qBcR9F3gmdj0_ICQ}
+GEMINI_MODEL=${GEMINI_MODEL:-gemini-flash-lite-latest}
+AUDIO_WS_URL=${AUDIO_WS_URL:-ws://api.vinxa.ogakash.xyz/ws/audio}
+EOF
 
-log_ok "Environment file updated."
+chmod 600 "${ENV_FILE}"
+log_ok "Environment file written with sanitized JDBC URL: ${CLEAN_DB_URL}"
 
 # ------------------------------------------------------------------------------
 # 3. Backup Current Release for Instant Rollback
