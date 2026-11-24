@@ -1,10 +1,10 @@
 # Stage 1: Build React Dashboard
 FROM node:20-alpine AS builder
 WORKDIR /workspace
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY apps/dashboard/package.json ./apps/dashboard/package.json
 COPY apps/extension/package.json ./apps/extension/package.json
-RUN npm ci
+RUN npm install --include=optional --no-audit --no-fund
 COPY apps/dashboard ./apps/dashboard
 RUN npm run build --workspace=apps/dashboard
 

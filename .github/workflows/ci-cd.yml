@@ -82,10 +82,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
 
-      - name: Install Monorepo Dependencies
-        run: npm ci
+      - name: Install Monorepo Dependencies (Resolve Linux Native Rollup/Esbuild Binaries)
+        run: |
+          rm -f package-lock.json apps/dashboard/package-lock.json apps/extension/package-lock.json
+          npm install --include=optional --no-audit --no-fund
 
       - name: Build Dashboard (TypeScript + Vite)
         env:

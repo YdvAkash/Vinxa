@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Vinxa Live ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â AWS EC2 Automated Continuous Deployment Script
+# Vinxa Live ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â AWS EC2 Automated Continuous Deployment Script
 # ==============================================================================
 # Executed by the GitHub Actions CD pipeline (or manually on EC2) after
 # ec2-preflight-setup.sh has verified/installed all prerequisites.
@@ -29,7 +29,7 @@ log_warn()  { echo -e "\033[1;33m[DEPLOY-WARN]\033[0m  $*"; }
 log_error() { echo -e "\033[1;31m[DEPLOY-ERROR]\033[0m $*" >&2; }
 
 echo "=============================================================================="
-echo " Vinxa Live ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Starting CD Deployment on AWS EC2"
+echo " Vinxa Live ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Starting CD Deployment on AWS EC2"
 echo " Mode        : ${DEPLOY_MODE}"
 echo " App Dir     : ${APP_DIR}"
 echo " Timestamp   : ${TIMESTAMP}"
@@ -120,7 +120,8 @@ else
     if [ ! -f "${APP_DIR}/dashboard/dist/index.html" ] && [ -f "${APP_DIR}/package.json" ]; then
         log_info "Building Frontend Dashboard & Extension on EC2..."
         cd "${APP_DIR}"
-        npm ci
+        rm -f package-lock.json apps/dashboard/package-lock.json apps/extension/package-lock.json
+        npm install --include=optional --no-audit --no-fund
         npm run build:dashboard
         npm run build:extension
         mkdir -p "${APP_DIR}/dashboard/dist"
