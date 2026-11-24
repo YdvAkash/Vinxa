@@ -12,7 +12,14 @@ import {
   PublicSharedMeetingData
 } from '../types';
 
-const API_BASE = 'http://localhost:8080/api/v1';
+const isLocalhost =
+  typeof window === 'undefined' ||
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1';
+
+export const API_BASE = !isLocalhost
+  ? `${window.location.origin}/api/v1`
+  : (import.meta as any).env?.VITE_API_BASE_URL || 'http://api.vinxa.ogakash.xyz/api/v1';
 
 let authToken: string | null = localStorage.getItem('vinxa_token');
 
@@ -24,7 +31,7 @@ export const DEFAULT_SETTINGS: VinxaSettings = {
   autoPurgeDays: 30,
   autoScrollLive: true,
   onScreenCaptionsEnabled: true,
-  webhookUrl: 'http://localhost:8080/api/v1/webhooks/test-receiver',
+  webhookUrl: `${API_BASE}/webhooks/test-receiver`,
   webhookSecret: '',
   webhookAutoPush: false
 };

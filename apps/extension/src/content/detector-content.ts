@@ -5,8 +5,14 @@
 (function initVinxaContentScript() {
   const currentHref = window.location.href;
   const isVinxaDashboard =
+    currentHref.startsWith('http://vinxa.ogakash.xyz') ||
+    currentHref.startsWith('https://vinxa.ogakash.xyz') ||
+    currentHref.startsWith('http://api.vinxa.ogakash.xyz') ||
+    currentHref.startsWith('https://api.vinxa.ogakash.xyz') ||
+    currentHref.startsWith('http://13.237.88.27') ||
     currentHref.startsWith('http://localhost:5173') ||
-    currentHref.startsWith('http://127.0.0.1:5173');
+    currentHref.startsWith('http://127.0.0.1:5173') ||
+    document.querySelector('meta[name="vinxa-dashboard"]') !== null;
 
   // ============================================================================
   // MODE 1: VINXA WEB DASHBOARD AUTH & SETTINGS SYNCHRONIZATION BRIDGE
@@ -20,6 +26,7 @@
         const token = localStorage.getItem('vinxa_token');
         const userRaw = localStorage.getItem('vinxa_user');
         const loggedOut = localStorage.getItem('vinxa_logged_out');
+        const serverOrigin = window.location.origin;
 
         if (token && userRaw) {
           const user = JSON.parse(userRaw);
@@ -28,7 +35,8 @@
               .sendMessage({
                 type: 'SYNC_EXTENSION_AUTH',
                 token,
-                email: user.email
+                email: user.email,
+                serverOrigin
               })
               .catch(() => {});
             return;
@@ -36,7 +44,9 @@
         }
 
         if (loggedOut === 'true' || !token) {
-          chrome.runtime.sendMessage({ type: 'REVOKE_EXTENSION_AUTH' }).catch(() => {});
+          chrome.runtime
+            .sendMessage({ type: 'REVOKE_EXTENSION_AUTH', serverOrigin })
+            .catch(() => {});
         }
       } catch {
         // Ignore parse errors
@@ -47,16 +57,20 @@
 
     window.addEventListener('vinxa-auth-changed', (ev: any) => {
       const detail = ev?.detail;
+      const serverOrigin = window.location.origin;
       if (detail?.token && detail?.user?.email) {
         chrome.runtime
           .sendMessage({
             type: 'SYNC_EXTENSION_AUTH',
             token: detail.token,
-            email: detail.user.email
+            email: detail.user.email,
+            serverOrigin
           })
           .catch(() => {});
       } else {
-        chrome.runtime.sendMessage({ type: 'REVOKE_EXTENSION_AUTH' }).catch(() => {});
+        chrome.runtime
+          .sendMessage({ type: 'REVOKE_EXTENSION_AUTH', serverOrigin })
+          .catch(() => {});
       }
     });
 

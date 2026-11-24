@@ -1,4 +1,5 @@
 import { ExtensionRecordingState, MeetingPlatform } from '../adapters/types';
+import { resolveExtensionEndpoints, setStoredServerOrigin } from '../config';
 
 function detectPlatformFromUrl(urlString: string): MeetingPlatform {
   try {
@@ -105,8 +106,9 @@ setInterval(async () => {
   try {
     const token = await getBackendAuthToken();
     if (!token) return;
+    const { apiBase } = await resolveExtensionEndpoints();
     const res = await fetch(
-      `http://localhost:8080/api/v1/meetings/${activeMeetingId}/transcript`,
+      `${apiBase}/meetings/${activeMeetingId}/transcript`,
       {
         headers: { Authorization: `Bearer ${token}` }
       }
@@ -250,6 +252,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'SYNC_EXTENSION_AUTH') {
+    if (message.serverOrigin) {
+      setStoredServerOrigin(message.serverOrigin).catch(() => {});
+    }
     if (message.token && message.email) {
       chrome.storage.local
         .set({
@@ -265,6 +270,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'REVOKE_EXTENSION_AUTH') {
+    if (message.serverOrigin) {
+      setStoredServerOrigin(message.serverOrigin).catch(() => {});
+    }
     chrome.storage.local.remove(['authToken', 'userEmail']).then(async () => {
       if (currentState === 'RECORDING') {
         await handleStopCapture();
@@ -377,10 +385,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const lang = message.language || 'multi';
     chrome.storage.local.set({ selectedLanguage: lang });
     if (targetMeetingId) {
-      getBackendAuthToken()
-        .then((token) => {
+      Promise.all([getBackendAuthToken(), resolveExtensionEndpoints()])
+        .then(([token, { apiBase }]) => {
           if (!token) throw new Error('Authentication required');
-          return fetch(`http://localhost:8080/api/v1/meetings/${targetMeetingId}/language`, {
+          return fetch(`${apiBase}/meetings/${targetMeetingId}/language`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -408,10 +416,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: true, translations: texts });
       return true;
     }
-    getBackendAuthToken()
-      .then((token) => {
+    Promise.all([getBackendAuthToken(), resolveExtensionEndpoints()])
+      .then(([token, { apiBase }]) => {
         if (!token) throw new Error('Authentication required');
-        return fetch('http://localhost:8080/api/v1/copilot/translate', {
+        return fetch(`${apiBase}/copilot/translate`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -458,13 +466,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'OPEN_DASHBOARD_TAB') {
-    const url = message.url
-      ? message.url
-      : message.meetingId
-      ? `http://localhost:5173/live?id=${message.meetingId}`
-      : 'http://localhost:5173';
-    chrome.tabs.create({ url });
-    sendResponse({ success: true });
+    resolveExtensionEndpoints().then(({ dashboardBase }) => {
+      const url = message.url
+        ? message.url
+        : message.meetingId
+        ? `${dashboardBase}/live?id=${message.meetingId}`
+        : dashboardBase;
+      chrome.tabs.create({ url });
+      sendResponse({ success: true });
+    });
     return true;
   }
 
@@ -538,8 +548,9 @@ async function startFullCaptureFlow(
   if (!token) {
     throw new Error('AUTH_REQUIRED: Please sign in to Vinxa Live before starting meeting capture.');
   }
+  const { apiBase } = await resolveExtensionEndpoints();
 
-  const meetRes = await fetch('http://localhost:8080/api/v1/meetings', {
+  const meetRes = await fetch(`${apiBase}/meetings`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -552,12 +563,12 @@ async function startFullCaptureFlow(
     throw new Error('AUTH_REQUIRED: Your session has expired. Please sign in again.');
   }
   if (!meetRes.ok) {
-    throw new Error('Backend server unreachable on port 8080');
+    throw new Error(`Backend server unreachable at ${apiBase}`);
   }
   const meetingData = await meetRes.json();
   const newMeetingId = meetingData.id;
 
-  await fetch(`http://localhost:8080/api/v1/meetings/${newMeetingId}/consent`, {
+  await fetch(`${apiBase}/meetings/${newMeetingId}/consent`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -573,7 +584,7 @@ async function startFullCaptureFlow(
   let ticket = '';
   try {
     const ticketRes = await fetch(
-      `http://localhost:8080/api/v1/meetings/${newMeetingId}/stream-ticket`,
+      `${apiBase}/meetings/${newMeetingId}/stream-ticket`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
@@ -593,7 +604,8 @@ async function stopFullCaptureFlow() {
     try {
       const token = await getBackendAuthToken();
       if (token) {
-        await fetch(`http://localhost:8080/api/v1/meetings/${activeMeetingId}/stop`, {
+        const { apiBase } = await resolveExtensionEndpoints();
+        await fetch(`${apiBase}/meetings/${activeMeetingId}/stop`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -636,6 +648,7 @@ async function handleStartCapture(
   liveSegments = [];
   liveInterimText = '';
   isPaused = false;
+  const { wsBase } = await resolveExtensionEndpoints();
 
   const offscreenResponse = await new Promise<any>((resolve, reject) => {
     chrome.runtime.sendMessage(
@@ -644,7 +657,8 @@ async function handleStartCapture(
         streamId,
         meetingId,
         ticket,
-        language
+        language,
+        wsBase
       },
       (response) => {
         if (chrome.runtime.lastError) {

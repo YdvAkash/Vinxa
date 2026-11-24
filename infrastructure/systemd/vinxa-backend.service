@@ -1,0 +1,19 @@
+[Unit]
+Description=Vinxa Live Backend Service (Spring Boot 3 + Java 21)
+After=network.target
+
+[Service]
+Type=simple
+User=__DEPLOY_USER__
+WorkingDirectory=__APP_DIR__/backend
+EnvironmentFile=-__APP_DIR__/.env
+ExecStart=/usr/bin/java -Xms256m -Xmx768m -XX:+UseG1GC -jar __APP_DIR__/backend/vinxa-live-backend.jar
+SuccessExitStatus=143
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vinxa-backend
+
+[Install]
+WantedBy=multi-user.target

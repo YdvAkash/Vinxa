@@ -1,0 +1,237 @@
+name: Vinxa Live — CI/CD Pipeline (AWS EC2)
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: "EC2 Deployment Mode (native = systemd + Nginx, docker = Docker Compose)"
+        required: false
+        default: "native"
+        type: choice
+        options:
+          - native
+          - docker
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: "21"
+  NODE_VERSION: "20"
+  EC2_APP_DIR: "/opt/vinxa"
+
+jobs:
+  # ============================================================================
+  # STAGE 1A (CI): Backend Build, Unit Tests & Packaging (Spring Boot 3 + Java 21)
+  # ============================================================================
+  ci-backend:
+    name: "CI — Backend (Java 21 & Spring Boot 3)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: "temurin"
+          cache: "maven"
+
+      - name: Run Backend Unit Tests
+        run: mvn test -B -Dtest=!NeonDatabaseConnectionTest
+
+      - name: Package Spring Boot Executable JAR
+        run: |
+          mvn package -DskipTests -B
+          cp target/vinxa-live-backend-*.jar target/vinxa-live-backend.jar
+
+      - name: Upload Backend JAR Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vinxa-backend-jar
+          path: backend/target/vinxa-live-backend.jar
+          if-no-files-found: error
+          retention-days: 7
+
+  # ============================================================================
+  # STAGE 1B (CI): Frontend Dashboard & Chrome Extension Build (Node.js 20)
+  # ============================================================================
+  ci-frontend:
+    name: "CI — Frontend Dashboard & Extension (Node 20)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install Monorepo Dependencies
+        run: npm ci
+
+      - name: Build Dashboard (TypeScript + Vite)
+        env:
+          VITE_EC2_HOST: ${{ secrets.EC2_DOMAIN || 'api.vinxa.ogakash.xyz' }}
+          VITE_API_BASE_URL: http://${{ secrets.EC2_DOMAIN || 'api.vinxa.ogakash.xyz' }}/api/v1
+          VITE_WS_BASE_URL: ws://${{ secrets.EC2_DOMAIN || 'api.vinxa.ogakash.xyz' }}
+        run: npm run build:dashboard
+
+      - name: Build Chrome Extension (Manifest V3)
+        env:
+          VITE_EC2_HOST: ${{ secrets.EC2_DOMAIN || 'api.vinxa.ogakash.xyz' }}
+        run: npm run build:extension
+
+      - name: Upload Dashboard Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vinxa-dashboard-dist
+          path: apps/dashboard/dist
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Chrome Extension Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vinxa-extension-dist
+          path: apps/extension/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  # ============================================================================
+  # STAGE 2 (PRE-DEPLOY + CD): Check & Install EC2 Prerequisites -> Deploy to EC2
+  # ============================================================================
+  cd-aws-ec2:
+    name: "CD — EC2 Pre-Flight Check, Auto-Install & Deploy"
+    needs: [ci-backend, ci-frontend]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository (Infrastructure & Scripts)
+        uses: actions/checkout@v4
+
+      - name: Download Backend JAR Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vinxa-backend-jar
+          path: release-bundle/backend
+
+      - name: Download Dashboard Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vinxa-dashboard-dist
+          path: release-bundle/dashboard/dist
+
+      - name: Download Chrome Extension Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vinxa-extension-dist
+          path: release-bundle/extension/dist
+
+      - name: Verify AWS EC2 Connection Secrets
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST || '13.237.88.27' }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          if [ -z "${EC2_HOST}" ] || [ -z "${EC2_SSH_KEY}" ]; then
+            echo "::error::Missing required GitHub Secret: EC2_SSH_KEY (and EC2_HOST)."
+            echo "Please configure EC2_HOST (13.237.88.27) and EC2_SSH_KEY in Repository Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Configure SSH Client & Key for AWS EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST || '13.237.88.27' }}
+          EC2_PORT: ${{ secrets.EC2_PORT || '22' }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${EC2_SSH_KEY}" > ~/.ssh/id_ec2
+          chmod 600 ~/.ssh/id_ec2
+          ssh-keyscan -p "${EC2_PORT}" -H "${EC2_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: "STEP 1 (Pre-Deploy): Check Required Dependencies on EC2 & Auto-Install Missing Packages"
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST || '13.237.88.27' }}
+          EC2_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
+          EC2_PORT: ${{ secrets.EC2_PORT || '22' }}
+        run: |
+          echo "Connecting to EC2 (${EC2_USER}@${EC2_HOST}) to verify and auto-install prerequisites before pushing application code..."
+          chmod +x infrastructure/scripts/ec2-preflight-setup.sh
+          scp -i ~/.ssh/id_ec2 -P "${EC2_PORT}" -o StrictHostKeyChecking=no \
+            infrastructure/scripts/ec2-preflight-setup.sh \
+            "${EC2_USER}@${EC2_HOST}:/tmp/ec2-preflight-setup.sh"
+
+          ssh -i ~/.ssh/id_ec2 -p "${EC2_PORT}" -o StrictHostKeyChecking=no \
+            "${EC2_USER}@${EC2_HOST}" \
+            "chmod +x /tmp/ec2-preflight-setup.sh && APP_DIR='${EC2_APP_DIR}' DEPLOY_USER='${EC2_USER}' bash /tmp/ec2-preflight-setup.sh"
+
+      - name: "STEP 2 (Transfer): Push Verified Build Artifacts & Infrastructure Configs to EC2"
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST || '13.237.88.27' }}
+          EC2_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
+          EC2_PORT: ${{ secrets.EC2_PORT || '22' }}
+        run: |
+          cp -r infrastructure release-bundle/infrastructure
+          chmod +x release-bundle/infrastructure/scripts/*.sh
+          tar -czf vinxa-release.tar.gz -C release-bundle .
+
+          scp -i ~/.ssh/id_ec2 -P "${EC2_PORT}" -o StrictHostKeyChecking=no \
+            vinxa-release.tar.gz \
+            "${EC2_USER}@${EC2_HOST}:/tmp/vinxa-release.tar.gz"
+
+          ssh -i ~/.ssh/id_ec2 -p "${EC2_PORT}" -o StrictHostKeyChecking=no \
+            "${EC2_USER}@${EC2_HOST}" \
+            "mkdir -p '${EC2_APP_DIR}' && tar -xzf /tmp/vinxa-release.tar.gz -C '${EC2_APP_DIR}' && rm -f /tmp/vinxa-release.tar.gz"
+
+      - name: "STEP 3 (CD): Deploy Application, Configure Services & Verify Health on EC2"
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST || '13.237.88.27' }}
+          EC2_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
+          EC2_PORT: ${{ secrets.EC2_PORT || '22' }}
+          DEPLOY_MODE: ${{ inputs.deploy_mode || 'native' }}
+          SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
+          SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-flash-lite-latest' }}
+        run: |
+          ssh -i ~/.ssh/id_ec2 -p "${EC2_PORT}" -o StrictHostKeyChecking=no \
+            "${EC2_USER}@${EC2_HOST}" \
+            "APP_DIR='${EC2_APP_DIR}' \
+             DEPLOY_USER='${EC2_USER}' \
+             DEPLOY_MODE='${DEPLOY_MODE}' \
+             SPRING_PROFILES_ACTIVE='prod' \
+             SPRING_DATASOURCE_URL='${SPRING_DATASOURCE_URL}' \
+             SPRING_DATASOURCE_USERNAME='${SPRING_DATASOURCE_USERNAME}' \
+             SPRING_DATASOURCE_PASSWORD='${SPRING_DATASOURCE_PASSWORD}' \
+             JWT_SECRET='${JWT_SECRET}' \
+             DEEPGRAM_API_KEY='${DEEPGRAM_API_KEY}' \
+             GEMINI_API_KEY='${GEMINI_API_KEY}' \
+             GEMINI_MODEL='${GEMINI_MODEL}' \
+             bash '${EC2_APP_DIR}/infrastructure/scripts/deploy-ec2.sh'"
+
+      - name: Clean up SSH Key
+        if: always()
+        run: rm -f ~/.ssh/id_ec2

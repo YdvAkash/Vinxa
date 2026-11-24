@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { MeetingPlatform } from '../adapters/types';
+import {
+  ExtensionEndpoints,
+  getDefaultServerOrigin,
+  normalizeServerOrigin,
+  resolveExtensionEndpoints,
+  setStoredServerOrigin
+} from '../config';
 
 const SUPPORTED_LANGUAGES = [
   { code: 'multi', label: '🌐 Auto Multi-Language (EN + HI + Global)' },
@@ -68,6 +75,13 @@ export const PopupApp: React.FC = () => {
   const [emailInput, setEmailInput] = useState<string>('');
   const [passwordInput, setPasswordInput] = useState<string>('');
 
+  // Dynamic Server Endpoint State (AWS EC2 or Localhost)
+  const [endpoints, setEndpoints] = useState<ExtensionEndpoints>(() =>
+    normalizeServerOrigin(getDefaultServerOrigin())
+  );
+  const [serverInput, setServerInput] = useState<string>(() => getDefaultServerOrigin());
+  const [showServerEditor, setShowServerEditor] = useState<boolean>(false);
+
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const active = tabs[0];
@@ -92,19 +106,27 @@ export const PopupApp: React.FC = () => {
       }
     });
 
-    // Trigger auth bridge sync on any open localhost:5173 tab
-    chrome.tabs.query({ url: 'http://localhost:5173/*' }, (dashTabs) => {
-      for (const dt of dashTabs) {
-        if (dt.id) {
-          chrome.runtime.sendMessage({ type: 'ENSURE_OVERLAY', tabId: dt.id });
-        }
+    // Trigger auth bridge sync on any open Vinxa dashboard tab (Localhost or EC2)
+    resolveExtensionEndpoints().then((ep) => {
+      setEndpoints(ep);
+      setServerInput(ep.serverOrigin);
+      const queryPatterns = ['http://localhost:5173/*'];
+      if (!ep.isLocal) {
+        queryPatterns.push(`${ep.dashboardBase}/*`);
       }
+      chrome.tabs.query({ url: queryPatterns }, (dashTabs) => {
+        for (const dt of dashTabs) {
+          if (dt.id) {
+            chrome.runtime.sendMessage({ type: 'ENSURE_OVERLAY', tabId: dt.id });
+          }
+        }
+      });
     });
 
     verifyStoredAuth();
 
     const storageListener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-      if (changes.authToken || changes.userEmail) {
+      if (changes.authToken || changes.userEmail || changes.vinxaServerOrigin) {
         verifyStoredAuth();
       }
       if (changes.recordingState) {
@@ -171,6 +193,10 @@ export const PopupApp: React.FC = () => {
           checkMic();
         }
 
+        const ep = await resolveExtensionEndpoints();
+        setEndpoints(ep);
+        setServerInput(ep.serverOrigin);
+
         const token = data.authToken;
         if (!token) {
           setIsAuthenticated(false);
@@ -180,7 +206,7 @@ export const PopupApp: React.FC = () => {
         }
 
         try {
-          const meRes = await fetch('http://localhost:8080/api/v1/auth/me', {
+          const meRes = await fetch(`${ep.apiBase}/auth/me`, {
             headers: { Authorization: `Bearer ${token}` }
           });
           if (meRes.ok) {
@@ -235,6 +261,15 @@ export const PopupApp: React.FC = () => {
     setTimeout(() => setStatusFeedback(null), 2200);
   }
 
+  const handleSaveServerOrigin = async (customOrigin?: string) => {
+    const updated = await setStoredServerOrigin(customOrigin ?? serverInput);
+    setEndpoints(updated);
+    setServerInput(updated.serverOrigin);
+    setShowServerEditor(false);
+    showFeedback(`✓ Server set to ${updated.serverOrigin}`);
+    verifyStoredAuth();
+  };
+
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -244,8 +279,9 @@ export const PopupApp: React.FC = () => {
     }
     setLoading(true);
     try {
+      const ep = await resolveExtensionEndpoints();
       const endpoint = authMode === 'login' ? 'login' : 'register';
-      const res = await fetch(`http://localhost:8080/api/v1/auth/${endpoint}`, {
+      const res = await fetch(`${ep.apiBase}/auth/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: emailInput.trim(), password: passwordInput })
@@ -277,7 +313,7 @@ export const PopupApp: React.FC = () => {
   };
 
   const openWebLogin = () => {
-    chrome.tabs.create({ url: 'http://localhost:5173/?auth=extension' });
+    chrome.tabs.create({ url: `${endpoints.dashboardBase}/?auth=extension` });
   };
 
   const handleStartCapture = async () => {
@@ -287,6 +323,7 @@ export const PopupApp: React.FC = () => {
 
     let createdMeetingId: string | null = null;
     let token = '';
+    const ep = await resolveExtensionEndpoints();
 
     try {
       token = await getAuthToken();
@@ -295,7 +332,7 @@ export const PopupApp: React.FC = () => {
         throw new Error('Please sign in before starting meeting capture.');
       }
 
-      const meetRes = await fetch('http://localhost:8080/api/v1/meetings', {
+      const meetRes = await fetch(`${ep.apiBase}/meetings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -314,14 +351,14 @@ export const PopupApp: React.FC = () => {
       }
 
       if (!meetRes.ok) {
-        throw new Error('Failed creating meeting session on backend. Is the server running?');
+        throw new Error(`Failed creating meeting session on ${ep.serverOrigin}. Is the server running?`);
       }
 
       const meetingData = await meetRes.json();
       createdMeetingId = meetingData.id;
       setMeetingId(createdMeetingId);
 
-      await fetch(`http://localhost:8080/api/v1/meetings/${createdMeetingId}/consent`, {
+      await fetch(`${ep.apiBase}/meetings/${createdMeetingId}/consent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -337,7 +374,7 @@ export const PopupApp: React.FC = () => {
       let ticket = '';
       try {
         const ticketRes = await fetch(
-          `http://localhost:8080/api/v1/meetings/${createdMeetingId}/stream-ticket`,
+          `${ep.apiBase}/meetings/${createdMeetingId}/stream-ticket`,
           {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}` }
@@ -368,7 +405,7 @@ export const PopupApp: React.FC = () => {
             const err = res?.error || 'Failed starting tab audio capture';
             setErrorMsg(err);
             if (createdMeetingId && token) {
-              fetch(`http://localhost:8080/api/v1/meetings/${createdMeetingId}`, {
+              fetch(`${ep.apiBase}/meetings/${createdMeetingId}`, {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${token}` }
               }).catch(() => {});
@@ -379,7 +416,7 @@ export const PopupApp: React.FC = () => {
     } catch (err: any) {
       setErrorMsg(err.message || 'Error initializing meeting capture');
       if (createdMeetingId && token) {
-        fetch(`http://localhost:8080/api/v1/meetings/${createdMeetingId}`, {
+        fetch(`${ep.apiBase}/meetings/${createdMeetingId}`, {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${token}` }
         }).catch(() => {});
@@ -405,7 +442,8 @@ export const PopupApp: React.FC = () => {
       if (meetingId) {
         const token = await getAuthToken();
         if (token) {
-          await fetch(`http://localhost:8080/api/v1/meetings/${meetingId}/stop`, {
+          const ep = await resolveExtensionEndpoints();
+          await fetch(`${ep.apiBase}/meetings/${meetingId}/stop`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}` }
           });
@@ -470,11 +508,12 @@ export const PopupApp: React.FC = () => {
   };
 
   const openDashboard = (customPath?: string) => {
+    const base = endpoints.dashboardBase;
     const url = customPath
-      ? `http://localhost:5173${customPath}`
+      ? `${base}${customPath}`
       : meetingId && isRecording
-      ? `http://localhost:5173/live?id=${meetingId}`
-      : 'http://localhost:5173';
+      ? `${base}/live?id=${meetingId}`
+      : base;
     chrome.tabs.create({ url });
   };
 
@@ -542,7 +581,7 @@ export const PopupApp: React.FC = () => {
             Sign In to Enable Live Captions
           </div>
           <div style={{ fontSize: '11.5px', color: '#64748b', lineHeight: 1.5 }}>
-            Connect your Vinxa Live workspace to stream real-time multi-language captions on Google Meet, Teams, and Zoom.
+            Connect your Vinxa Live workspace to stream real-time multi-language captions on meet, Teams, and Zoom.
           </div>
         </div>
 
@@ -566,6 +605,43 @@ export const PopupApp: React.FC = () => {
           <span>Sign In / Create Account on Vinxa Web</span>
           <span>→</span>
         </button>
+
+        {/* Server Endpoint Switcher (AWS EC2 / Localhost) */}
+        <div className="vx-card" style={{ padding: '8px 10px', gap: '6px' }}>
+          <div className="vx-row-between" style={{ fontSize: '10.5px' }}>
+            <span style={{ color: '#64748b', fontWeight: 700 }}>
+              Server: <strong style={{ color: '#1e1b4b' }}>{endpoints.serverOrigin}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowServerEditor(!showServerEditor)}
+              className="vx-btn-ghost"
+              style={{ color: '#7c3aed', padding: '1px 5px', fontSize: '10px' }}
+            >
+              {showServerEditor ? 'Close' : 'Change EC2 / Host'}
+            </button>
+          </div>
+          {showServerEditor && (
+            <div style={{ display: 'flex', gap: '5px', marginTop: '2px' }}>
+              <input
+                type="text"
+                placeholder="http://<EC2_PUBLIC_IP> or http://localhost:8080"
+                value={serverInput}
+                onChange={(e) => setServerInput(e.target.value)}
+                className="vx-input"
+                style={{ padding: '5px 8px', fontSize: '10.5px' }}
+              />
+              <button
+                type="button"
+                onClick={() => handleSaveServerOrigin()}
+                className="vx-btn vx-btn-primary"
+                style={{ width: 'auto', padding: '5px 10px', fontSize: '10.5px' }}
+              >
+                Save
+              </button>
+            </div>
+          )}
+        </div>
 
         <button
           type="button"
@@ -1016,6 +1092,15 @@ export const PopupApp: React.FC = () => {
         </button>
         <button
           type="button"
+          onClick={() => setShowServerEditor(!showServerEditor)}
+          title={`Connected Server: ${endpoints.serverOrigin}`}
+          className="vx-btn-ghost"
+          style={{ fontSize: '10px' }}
+        >
+          {endpoints.isLocal ? '🌐 Localhost' : `☁️ EC2 (${endpoints.serverOrigin.replace(/^https?:\/\//, '')})`}
+        </button>
+        <button
+          type="button"
           onClick={handleResetCapture}
           title="Reset audio capture engine"
           className="vx-btn-ghost"
@@ -1023,6 +1108,30 @@ export const PopupApp: React.FC = () => {
           Reset Engine
         </button>
       </div>
+
+      {showServerEditor && (
+        <div className="vx-card" style={{ padding: '8px 10px', gap: '6px' }}>
+          <span className="vx-label">Vinxa Server Endpoint (AWS EC2 IP or Localhost)</span>
+          <div style={{ display: 'flex', gap: '5px' }}>
+            <input
+              type="text"
+              placeholder="http://<EC2_PUBLIC_IP> or http://localhost:8080"
+              value={serverInput}
+              onChange={(e) => setServerInput(e.target.value)}
+              className="vx-input"
+              style={{ padding: '5px 8px', fontSize: '10.5px' }}
+            />
+            <button
+              type="button"
+              onClick={() => handleSaveServerOrigin()}
+              className="vx-btn vx-btn-primary"
+              style={{ width: 'auto', padding: '5px 10px', fontSize: '10.5px' }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

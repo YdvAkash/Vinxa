@@ -1,0 +1,28 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://ep-still-leaf-bevsok4d-pooler.c-9.us-east-2.aws.neon.tech/neondb?sslmode=require&prepareThreshold=0}
+    username: ${SPRING_DATASOURCE_USERNAME:neondb_owner}
+    password: ${SPRING_DATASOURCE_PASSWORD:npg_TmqHZps7oQb3}
+    driverClassName: org.postgresql.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+vinxa:
+  jwt:
+    secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  audio:
+    sample-rate: 16000
+    ticket-expiry-seconds: 60
+    ws-url: ${AUDIO_WS_URL:ws://api.vinxa.ogakash.xyz/ws/audio}
+  deepgram:
+    api-key: ${DEEPGRAM_API_KEY:e021ff3eee8696d392fe3ef7ca929ddcc8c076db}
+  gemini:
+    api-key: ${GEMINI_API_KEY:AQ.Ab8RN6Jsm5QfEi5vlcX0XBhXRAg97s1J_8qBcR9F3gmdj0_ICQ}
+    model: ${GEMINI_MODEL:gemini-flash-lite-latest}

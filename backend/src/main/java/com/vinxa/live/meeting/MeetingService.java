@@ -218,10 +218,13 @@ public class MeetingService {
         }
     }
 
+    @org.springframework.beans.factory.annotation.Value("${vinxa.audio.ws-url:ws://api.vinxa.ogakash.xyz/ws/audio}")
+    private String audioWsUrl = "ws://api.vinxa.ogakash.xyz/ws/audio";
+
     public StreamTicketResponse generateStreamTicket(User user, UUID meetingId) {
         Meeting meeting = getMeetingAndVerifyOwnership(user, meetingId);
         String ticket = jwtTokenProvider.generateStreamTicket(user.getId(), meeting.getId());
-        return new StreamTicketResponse(ticket, "ws://localhost:8080/ws/audio", 60);
+        return new StreamTicketResponse(ticket, audioWsUrl, 60);
     }
 
     public MeetingResponse stopMeeting(User user, UUID meetingId) {

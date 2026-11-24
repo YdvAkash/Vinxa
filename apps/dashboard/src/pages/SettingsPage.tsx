@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AuthUser, Meeting, VinxaSettings, WebhookDispatchResult } from '../types';
-import { api } from '../services/api';
+import { api, API_BASE } from '../services/api';
 import { SPOKEN_LANGUAGES, TRANSLATION_LANGUAGES } from './LiveMeetingPage';
 import {
   Shield,
@@ -50,7 +50,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       .then((cfg) => {
         setSettings((prev) => ({
           ...prev,
-          webhookUrl: cfg.webhookUrl || prev.webhookUrl || 'http://localhost:8080/api/v1/webhooks/test-receiver',
+          webhookUrl: cfg.webhookUrl || prev.webhookUrl || `${API_BASE}/webhooks/test-receiver`,
           webhookSecret: cfg.webhookSecret ?? prev.webhookSecret ?? '',
           webhookAutoPush: Boolean(cfg.webhookAutoPush)
         }));
@@ -387,7 +387,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               onClick={() =>
                 setSettings({
                   ...settings,
-                  webhookUrl: 'http://localhost:8080/api/v1/webhooks/test-receiver'
+                  webhookUrl: `${API_BASE}/webhooks/test-receiver`
                 })
               }
               className="text-[11px] font-bold text-violet-600 hover:text-violet-800 cursor-pointer"

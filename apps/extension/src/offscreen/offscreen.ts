@@ -1,3 +1,5 @@
+import { resolveExtensionEndpoints } from '../config';
+
 let mediaStream: MediaStream | null = null;
 let micStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
@@ -5,11 +7,18 @@ let websocket: WebSocket | null = null;
 let eventWebsocket: WebSocket | null = null;
 let framesSent = 0;
 let isPaused = false;
+let activeWsBase = 'ws://localhost:8080';
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'START_OFFSCREEN_CAPTURE') {
     isPaused = false;
-    startCapture(message.streamId, message.meetingId, message.ticket, message.language)
+    startCapture(
+      message.streamId,
+      message.meetingId,
+      message.ticket,
+      message.language,
+      message.wsBase
+    )
       .then((res) => sendResponse({ success: true, res }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -34,11 +43,18 @@ async function startCapture(
   streamId: string,
   meetingId: string,
   ticket?: string,
-  language: string = 'multi'
+  language: string = 'multi',
+  wsBase?: string
 ) {
   try {
     framesSent = 0;
     isPaused = false;
+    if (wsBase) {
+      activeWsBase = wsBase;
+    } else {
+      const endpoints = await resolveExtensionEndpoints();
+      activeWsBase = endpoints.wsBase;
+    }
 
     // 1. Acquire MediaStream from target meeting tab
     mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -91,7 +107,7 @@ async function startCapture(
     const ticketParam = ticket ? `&ticket=${encodeURIComponent(ticket)}` : '';
     const langParam = `&language=${encodeURIComponent(language || 'multi')}`;
     websocket = new WebSocket(
-      `ws://localhost:8080/ws/audio?meetingId=${encodeURIComponent(meetingId)}${ticketParam}${langParam}`
+      `${activeWsBase}/ws/audio?meetingId=${encodeURIComponent(meetingId)}${ticketParam}${langParam}`
     );
     websocket.binaryType = 'arraybuffer';
 
@@ -174,7 +190,7 @@ function connectEventWebSocket(meetingId: string) {
       eventWebsocket.close();
     }
     eventWebsocket = new WebSocket(
-      `ws://localhost:8080/ws/events?meetingId=${encodeURIComponent(meetingId)}`
+      `${activeWsBase}/ws/events?meetingId=${encodeURIComponent(meetingId)}`
     );
     eventWebsocket.onmessage = (ev) => {
       if (isPaused) return;

@@ -43,7 +43,12 @@ export function useMeetingSocket(meetingId: string | null) {
     // 2. Connect real-time Event WebSocket for sub-second interim + final push
     const connectWebSocket = () => {
       if (!isMounted) return;
-      const wsUrl = `ws://localhost:8080/ws/events?meetingId=${encodeURIComponent(meetingId)}`;
+      const isLocal =
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const wsBase = !isLocal
+        ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+        : (import.meta as any).env?.VITE_WS_BASE_URL || 'ws://api.vinxa.ogakash.xyz';
+      const wsUrl = `${wsBase}/ws/events?meetingId=${encodeURIComponent(meetingId)}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

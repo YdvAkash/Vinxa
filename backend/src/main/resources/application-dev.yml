@@ -20,6 +20,7 @@ vinxa:
   audio:
     sample-rate: 16000
     ticket-expiry-seconds: 60
+    ws-url: ${AUDIO_WS_URL:ws://api.vinxa.ogakash.xyz/ws/audio}
   deepgram:
     api-key: ${DEEPGRAM_API_KEY:e021ff3eee8696d392fe3ef7ca929ddcc8c076db}
   gemini:
