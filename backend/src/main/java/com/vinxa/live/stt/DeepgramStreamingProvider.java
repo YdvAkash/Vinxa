@@ -146,19 +146,39 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
     }
 
     private void connectDeepgramSocket(UUID meetingId, String lang, Consumer<TranscriptEvent> eventConsumer, boolean allowFallbackToMulti) {
+        String primaryModel = resolveBestModelForLanguage(lang);
+        connectDeepgramSocketWithModel(meetingId, lang, primaryModel, eventConsumer, allowFallbackToMulti);
+    }
+
+    String resolveBestModelForLanguage(String lang) {
+        if (lang == null || lang.isBlank()) {
+            return "nova-3";
+        }
+        String normalized = lang.trim().toLowerCase();
+        // Nova-2 is used for Hindi and languages where Nova-3 is not yet enabled; Nova-3 is used for multi, English, and major languages
+        if (normalized.startsWith("hi") || normalized.startsWith("zh") || normalized.startsWith("th") || normalized.startsWith("uk")) {
+            return "nova-2";
+        }
+        return "nova-3";
+    }
+
+    private void connectDeepgramSocketWithModel(
+            UUID meetingId,
+            String lang,
+            String modelName,
+            Consumer<TranscriptEvent> eventConsumer,
+            boolean allowFallbackToMulti
+    ) {
         if (!activeConsumers.containsKey(meetingId) || apiKey.startsWith("test-key-no-connect")) {
             return;
         }
         try {
             String encodedLang = URLEncoder.encode(lang, StandardCharsets.UTF_8);
-            String modelName = ("en".equalsIgnoreCase(lang) || "en-US".equalsIgnoreCase(lang))
-                    ? "nova-2-meeting"
-                    : "nova-2";
             String url = "wss://api.deepgram.com/v1/listen?model=" + modelName
                     + "&language=" + encodedLang
                     + "&encoding=linear16&sample_rate=16000&channels=1"
                     + "&diarize=true&punctuate=true&smart_format=true&no_delay=true"
-                    + "&interim_results=true&endpointing=400&utterance_end_ms=1000&vad_events=false";
+                    + "&interim_results=true&endpointing=350";
 
             httpClient.newWebSocketBuilder()
                     .header("Authorization", "Token " + apiKey)
@@ -174,14 +194,17 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
                         activeSockets.put(meetingId, ws);
                         AtomicInteger attempts = reconnectAttempts.get(meetingId);
                         if (attempts != null) attempts.set(0);
-                        log.info("Connected to Deepgram Nova-2 Live Streaming STT [language={}] for meeting {}", lang, meetingId);
+                        log.info("Connected to Deepgram {} Live Streaming STT [language={}] for meeting {}", modelName, lang, meetingId);
                         flushPendingAudioQueue(meetingId, ws);
                     })
                     .exceptionally(ex -> {
-                        log.warn("Failed connecting Deepgram with language={} for meeting {}: {}", lang, meetingId, ex.getMessage());
-                        if (allowFallbackToMulti && !"en".equals(lang)) {
-                            log.info("Retrying Deepgram connection with fallback language=en for meeting {}", meetingId);
-                            connectDeepgramSocket(meetingId, "en", eventConsumer, false);
+                        log.warn("Failed connecting Deepgram [model={}, language={}] for meeting {}: {}", modelName, lang, meetingId, ex.getMessage());
+                        if ("nova-3".equals(modelName)) {
+                            log.info("Retrying Deepgram connection with model=nova-2 [language={}] for meeting {}", lang, meetingId);
+                            connectDeepgramSocketWithModel(meetingId, lang, "nova-2", eventConsumer, allowFallbackToMulti);
+                        } else if (allowFallbackToMulti && !"multi".equalsIgnoreCase(lang)) {
+                            log.info("Retrying Deepgram connection with fallback language=multi [model=nova-3] for meeting {}", meetingId);
+                            connectDeepgramSocketWithModel(meetingId, "multi", "nova-3", eventConsumer, false);
                         } else {
                             activateFallback(meetingId, eventConsumer);
                         }
@@ -382,6 +405,10 @@ public class DeepgramStreamingProvider implements SpeechToTextProvider {
 
             boolean isFinal = root.path("is_final").asBoolean(true);
             double overallConfidence = bestAlt.path("confidence").asDouble(0.95);
+            // Filter out single-character or ultra-low-confidence background cough/breath hallucinations on final segments
+            if (isFinal && overallConfidence > 0.0 && overallConfidence < 0.32 && transcript.length() <= 3) {
+                return;
+            }
 
             Consumer<TranscriptEvent> consumer = activeConsumers.get(meetingId);
             if (consumer == null) return;

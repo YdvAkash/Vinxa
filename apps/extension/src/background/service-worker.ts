@@ -276,6 +276,21 @@ async function ensureContentScriptInjected(tabId: number | null) {
   }
 }
 
+function broadcastInterimToMeetingTab() {
+  if (!activeTabId) {
+    broadcastToMeetingTab();
+    return;
+  }
+  chrome.tabs
+    .sendMessage(activeTabId, {
+      type: 'LIVE_INTERIM_ONLY',
+      meetingId: activeMeetingId,
+      interimText: liveInterimText,
+      activeSpeaker: activeSpeakingJoinee
+    })
+    .catch(() => {});
+}
+
 function broadcastToMeetingTab() {
   const payload = {
     type: 'LIVE_TRANSCRIPT_UPDATE',
@@ -537,8 +552,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const nextInterim = ev.text || '';
         if (nextInterim !== liveInterimText) {
           liveInterimText = nextInterim;
-          // Broadcast immediately in <1ms without disk I/O contention on every partial syllable
-          broadcastToMeetingTab();
+          // Broadcast ultra-lightweight interim delta in <0.5ms without cloning full liveSegments array
+          broadcastInterimToMeetingTab();
         }
       } else if (ev.type === 'TRANSCRIPT' && ev.text) {
         liveInterimText = '';

@@ -169,12 +169,36 @@ async function startCapture(
     const tabSource = audioContext.createMediaStreamSource(mediaStream);
     tabSource.connect(audioContext.destination);
 
-    // 4. Use a 2-channel merger so Channel 0 = Pure Digital Tab Audio and Channel 1 = Filtered Mic Audio.
-    // This prevents open-mic room noise and speaker echo bleed from degrading remote participant speech accuracy!
-    const merger = audioContext.createChannelMerger(2);
-    tabSource.connect(merger, 0, 0);
+    // 4. Apply 3-Stage Vocal Clarity EQ to Tab Audio on the STT path only (leaves speaker playback untouched):
+    //    - 90Hz High-Pass: Removes room rumble, AC hum, and low-frequency boominess
+    //    - 260Hz Peaking (-2.5dB): Removes lower-mid vocal muddiness from compressed WebRTC codecs
+    //    - 3200Hz Peaking (+4.0dB): Boosts consonant and sibilant presence for higher word recognition accuracy
+    const tabHighPass = audioContext.createBiquadFilter();
+    tabHighPass.type = 'highpass';
+    tabHighPass.frequency.value = 90;
 
-    // 5. Capture and condition user's local microphone (85Hz high-pass + vocal presence boost + compressor)
+    const tabMudCut = audioContext.createBiquadFilter();
+    tabMudCut.type = 'peaking';
+    tabMudCut.frequency.value = 260;
+    tabMudCut.Q.value = 1.1;
+    tabMudCut.gain.value = -2.5;
+
+    const tabPresenceBoost = audioContext.createBiquadFilter();
+    tabPresenceBoost.type = 'peaking';
+    tabPresenceBoost.frequency.value = 3200;
+    tabPresenceBoost.Q.value = 0.9;
+    tabPresenceBoost.gain.value = 4.0;
+
+    tabSource.connect(tabHighPass);
+    tabHighPass.connect(tabMudCut);
+    tabMudCut.connect(tabPresenceBoost);
+
+    // 5. Use a 2-channel merger so Channel 0 = Vocal-EQ Tab Audio and Channel 1 = Vocal-EQ Mic Audio.
+    //    This prevents open-mic room noise and speaker echo bleed from degrading remote participant speech accuracy!
+    const merger = audioContext.createChannelMerger(2);
+    tabPresenceBoost.connect(merger, 0, 0);
+
+    // 6. Capture and condition user's local microphone (90Hz high-pass + 260Hz mud cut + 3.2kHz presence boost + compressor)
     let hasMicConnected = false;
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
@@ -188,28 +212,32 @@ async function startCapture(
       });
       const micSource = audioContext.createMediaStreamSource(micStream);
 
-      // High-pass filter at 85Hz removes low-frequency hum, fan rumble, and desk vibration
       const highPass = audioContext.createBiquadFilter();
       highPass.type = 'highpass';
-      highPass.frequency.value = 85;
+      highPass.frequency.value = 90;
 
-      // Presence boost at 2.8kHz improves consonant intelligibility for speech-to-text accuracy
+      const mudCut = audioContext.createBiquadFilter();
+      mudCut.type = 'peaking';
+      mudCut.frequency.value = 260;
+      mudCut.Q.value = 1.1;
+      mudCut.gain.value = -2.5;
+
       const presenceBoost = audioContext.createBiquadFilter();
       presenceBoost.type = 'peaking';
-      presenceBoost.frequency.value = 2800;
-      presenceBoost.Q.value = 1.0;
-      presenceBoost.gain.value = 3.0;
+      presenceBoost.frequency.value = 3200;
+      presenceBoost.Q.value = 0.9;
+      presenceBoost.gain.value = 4.0;
 
-      // Dynamics compressor levels quiet vs loud speech without clipping
       const compressor = audioContext.createDynamicsCompressor();
       compressor.threshold.value = -24;
-      compressor.knee.value = 18;
+      compressor.knee.value = 15;
       compressor.ratio.value = 3.5;
-      compressor.attack.value = 0.003;
-      compressor.release.value = 0.15;
+      compressor.attack.value = 0.002;
+      compressor.release.value = 0.12;
 
       micSource.connect(highPass);
-      highPass.connect(presenceBoost);
+      highPass.connect(mudCut);
+      mudCut.connect(presenceBoost);
       presenceBoost.connect(compressor);
       compressor.connect(merger, 0, 1);
       hasMicConnected = true;
@@ -217,34 +245,24 @@ async function startCapture(
       console.warn('[Vinxa Offscreen] Local microphone not available or denied:', micErr);
     }
 
-    // 6. Create ultra-low-latency 1024-sample processor (64ms per frame at 16kHz) with 2 input channels
-    const processor = audioContext.createScriptProcessor(1024, 2, 1);
-    merger.connect(processor);
-
-    // 7. Connect processor to muted gain node to keep Web Audio graph active
-    const silentGain = audioContext.createGain();
-    silentGain.gain.value = 0.0;
-    processor.connect(silentGain);
-    silentGain.connect(audioContext.destination);
-
-    // 8. Connect to Vinxa Backend Realtime Audio WebSocket & Live Event WebSocket
+    // 7. Connect to Vinxa Backend Realtime Audio WebSocket & Live Event WebSocket immediately
     connectAudioWebSocket(meetingId, ticket, language);
     connectEventWebSocket(meetingId);
 
-    // 9. Smart Anti-Echo & Noise-Gated DSP Mixer -> 16-bit Linear PCM stream
-    processor.onaudioprocess = (e) => {
-      if (isStopping) return;
+    // Adaptive Target-RMS Envelope Automatic Gain Control (AGC) state for smooth -16 dBFS (0.15 RMS) normalization
+    let smoothedTabGain = 1.35;
+    let smoothedMicGain = 1.45;
+    const TARGET_SPEECH_RMS = 0.15;
+    const MAX_AGC_GAIN = 4.8;
 
-      const tabData = e.inputBuffer.getChannelData(0);
-      const micData = hasMicConnected && e.inputBuffer.numberOfChannels > 1
-        ? e.inputBuffer.getChannelData(1)
-        : null;
+    const processDualChannelSamples = (tabData: Float32Array, micData: Float32Array | null) => {
+      if (isStopping) return;
       const len = tabData.length;
       const pcm16Buffer = new ArrayBuffer(len * 2);
 
       if (isPaused) {
         framesSent++;
-        if (framesSent % 35 === 0 && websocket && websocket.readyState === WebSocket.OPEN) {
+        if (framesSent % 45 === 0 && websocket && websocket.readyState === WebSocket.OPEN) {
           websocket.send(pcm16Buffer);
           chrome.runtime
             .sendMessage({
@@ -272,29 +290,38 @@ async function startCapture(
       const tabRms = Math.sqrt(tabSumSq / len);
       const micRms = micData ? Math.sqrt(micSumSq / len) : 0;
 
-      // Determine smart mixing weights to eliminate speaker echo bleed and mic background hiss:
-      // - If remote tab audio is active (tabRms > 0.005) and mic is not significantly louder than tab audio,
-      //   mute the mic channel so laptop speaker echo never double-records remote participants.
-      // - If mic energy is below the noise floor (micRms < 0.0025), gate out mic background static.
-      let micWeight = 0.0;
-      if (micData && micRms >= 0.0025) {
-        if (tabRms > 0.005 && micRms < tabRms * 1.45) {
-          micWeight = 0.0; // Suppress acoustic echo bleed from speakers during remote speech
-        } else {
-          // Boost quiet local microphone voice cleanly towards optimal STT level
-          micWeight = micRms < 0.04 ? 1.45 : 1.15;
-        }
+      // Smooth Adaptive AGC for Tab Audio (normalizes quiet remote speakers towards -16 dBFS)
+      let tabWeight = 0.0;
+      if (tabRms >= 0.0012) {
+        const desiredTabGain = Math.min(MAX_AGC_GAIN, Math.max(0.95, TARGET_SPEECH_RMS / (tabRms + 0.002)));
+        // Fast attack (0.35) to prevent clipping when speaker gets loud, smooth release (0.12) to lift quiet voices
+        const alpha = desiredTabGain < smoothedTabGain ? 0.35 : 0.12;
+        smoothedTabGain = smoothedTabGain * (1 - alpha) + desiredTabGain * alpha;
+        tabWeight = smoothedTabGain;
       }
 
-      const tabWeight = tabRms > 0.001 && tabRms < 0.04 ? 1.25 : 1.0;
+      // Smart Anti-Echo Gate + Smooth Adaptive AGC for Local Microphone
+      let micWeight = 0.0;
+      if (micData && micRms >= 0.0025) {
+        if (tabRms > 0.0045 && micRms < tabRms * 1.55) {
+          // Suppress laptop speaker echo bleed during active remote speech
+          micWeight = 0.0;
+        } else {
+          const desiredMicGain = Math.min(MAX_AGC_GAIN, Math.max(1.0, TARGET_SPEECH_RMS / (micRms + 0.002)));
+          const alpha = desiredMicGain < smoothedMicGain ? 0.35 : 0.14;
+          smoothedMicGain = smoothedMicGain * (1 - alpha) + desiredMicGain * alpha;
+          micWeight = smoothedMicGain;
+        }
+      }
 
       const view = new DataView(pcm16Buffer);
       let combinedSumSq = 0;
       for (let i = 0; i < len; i++) {
         let sample = tabData[i] * tabWeight + (micData ? micData[i] * micWeight : 0);
-        // Soft-knee limiter prevents harsh digital clipping
-        if (sample > 1.0) sample = 1.0;
-        else if (sample < -1.0) sample = -1.0;
+        // Smooth soft-knee saturation prevents harmonic clipping distortion across Mel-spectrogram bins
+        if (sample > 0.85 || sample < -0.85) {
+          sample = Math.tanh(sample);
+        }
         view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
         combinedSumSq += sample * sample;
       }
@@ -309,7 +336,7 @@ async function startCapture(
       }
       framesSent++;
 
-      if (framesSent % 30 === 0) {
+      if (framesSent % 40 === 0) {
         const rms = Math.sqrt(combinedSumSq / len);
         chrome.runtime
           .sendMessage({
@@ -321,6 +348,84 @@ async function startCapture(
           .catch(() => {});
       }
     };
+
+    const silentGain = audioContext.createGain();
+    silentGain.gain.value = 0.0;
+    silentGain.connect(audioContext.destination);
+
+    // 8. Prefer off-main-thread AudioWorkletProcessor (512 samples = 32ms ultra-low latency at 16kHz)
+    //    with automatic fallback to 512-sample ScriptProcessorNode
+    let workletActive = false;
+    if (audioContext.audioWorklet) {
+      try {
+        const workletCode = `
+          class VinxaCaptureWorklet extends AudioWorkletProcessor {
+            constructor() {
+              super();
+              this.ch0 = new Float32Array(512);
+              this.ch1 = new Float32Array(512);
+              this.offset = 0;
+            }
+            process(inputs) {
+              const input = inputs[0];
+              if (!input || input.length === 0) return true;
+              const in0 = input[0];
+              const in1 = input.length > 1 ? input[1] : null;
+              if (!in0) return true;
+              const len = in0.length;
+              for (let i = 0; i < len; i++) {
+                this.ch0[this.offset] = in0[i];
+                this.ch1[this.offset] = in1 ? in1[i] : 0;
+                this.offset++;
+                if (this.offset >= 512) {
+                  const out0 = this.ch0.slice();
+                  const out1 = this.ch1.slice();
+                  this.port.postMessage({ ch0: out0, ch1: out1 }, [out0.buffer, out1.buffer]);
+                  this.offset = 0;
+                }
+              }
+              return true;
+            }
+          }
+          registerProcessor('vinxa-capture-worklet', VinxaCaptureWorklet);
+        `;
+        const blob = new Blob([workletCode], { type: 'application/javascript' });
+        const workletUrl = URL.createObjectURL(blob);
+        await audioContext.audioWorklet.addModule(workletUrl);
+        URL.revokeObjectURL(workletUrl);
+
+        const workletNode = new AudioWorkletNode(audioContext, 'vinxa-capture-worklet', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          channelCount: 2,
+          channelCountMode: 'explicit'
+        });
+        workletNode.port.onmessage = (ev) => {
+          const { ch0, ch1 } = ev.data;
+          processDualChannelSamples(ch0, hasMicConnected ? ch1 : null);
+        };
+        merger.connect(workletNode);
+        workletNode.connect(silentGain);
+        workletActive = true;
+      } catch (workletErr) {
+        console.warn('[Vinxa Offscreen] AudioWorklet fallback to ScriptProcessor:', workletErr);
+      }
+    }
+
+    if (!workletActive) {
+      // Ultra-low-latency 512-sample processor (32ms per frame at 16kHz) with 2 input channels
+      const processor = audioContext.createScriptProcessor(512, 2, 1);
+      merger.connect(processor);
+      processor.connect(silentGain);
+      processor.onaudioprocess = (e) => {
+        const tabData = e.inputBuffer.getChannelData(0);
+        const micData =
+          hasMicConnected && e.inputBuffer.numberOfChannels > 1
+            ? e.inputBuffer.getChannelData(1)
+            : null;
+        processDualChannelSamples(tabData, micData);
+      };
+    }
 
     return { framesSent: 0, status: 'STARTED' };
   } catch (err: any) {

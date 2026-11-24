@@ -117,4 +117,42 @@ class DeepgramStreamingProviderTest {
 
         provider.stopSession(meetingId);
     }
+
+    @Test
+    void testResolveBestModelAndNoiseFiltering() {
+        SyntheticStreamingProvider fallback = new SyntheticStreamingProvider();
+        DeepgramStreamingProvider provider = new DeepgramStreamingProvider("test-key-no-connect", fallback);
+
+        assertEquals("nova-3", provider.resolveBestModelForLanguage("multi"));
+        assertEquals("nova-3", provider.resolveBestModelForLanguage("en"));
+        assertEquals("nova-3", provider.resolveBestModelForLanguage("en-IN"));
+        assertEquals("nova-2", provider.resolveBestModelForLanguage("hi"));
+
+        UUID meetingId = UUID.randomUUID();
+        List<TranscriptEvent> receivedEvents = new ArrayList<>();
+        provider.startSession(meetingId, "multi", receivedEvents::add);
+
+        // Low-confidence 2-char breath/cough noise token should be filtered out
+        String noiseJson = """
+                {
+                  "type": "Results",
+                  "is_final": true,
+                  "start": 5.0,
+                  "duration": 0.3,
+                  "channel": {
+                    "alternatives": [
+                      {
+                        "transcript": "uh",
+                        "confidence": 0.18,
+                        "words": []
+                      }
+                    ]
+                  }
+                }
+                """;
+        provider.handleDeepgramMessage(meetingId, noiseJson);
+        assertTrue(receivedEvents.isEmpty(), "Low-confidence short noise tokens should be filtered out");
+
+        provider.stopSession(meetingId);
+    }
 }

@@ -1451,8 +1451,63 @@
     }
   });
 
+  function renderInterimOnly() {
+    if (isMinimized) {
+      const latestText =
+        interimText ||
+        (segments.length > 0 ? segments[segments.length - 1].text : 'Vinxa Live');
+      titleSpan.textContent =
+        latestText.length > 42 ? latestText.substring(0, 42) + '…' : latestText;
+      return;
+    }
+
+    const emptyEl = feedBox.querySelector('.empty-state');
+    if (emptyEl && interimText) {
+      emptyEl.remove();
+    } else if (!emptyEl && segments.length === 0 && !interimText) {
+      renderFeed();
+      return;
+    }
+
+    const interimNode = feedBox.querySelector<HTMLElement>('.interim-box');
+    if (interimText && !isPaused) {
+      const liveSpeaker =
+        activeSpeakingJoinee ||
+        (detectedJoinees.length > 0 ? detectedJoinees[0] : null) ||
+        (segments.length > 0 ? resolveHudSpeakerDisplayName(segments[segments.length - 1]) : 'Live Speaker');
+      const expectedInterim = `🎙️ ${liveSpeaker}: ${interimText}`;
+      if (!interimNode) {
+        const interim = document.createElement('div');
+        interim.className = 'interim-box';
+        interim.textContent = expectedInterim;
+        feedBox.appendChild(interim);
+      } else {
+        if (interimNode.textContent !== expectedInterim) {
+          interimNode.textContent = expectedInterim;
+        }
+        if (feedBox.lastElementChild !== interimNode) {
+          feedBox.appendChild(interimNode);
+        }
+      }
+      if (!userScrolledUp || Date.now() - lastManualUserWheelAt > 8000) {
+        userScrolledUp = false;
+        resumeScrollBtn.style.display = 'none';
+        feedBox.scrollTop = feedBox.scrollHeight;
+      }
+    } else if (interimNode) {
+      interimNode.remove();
+    }
+  }
+
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === 'LIVE_TRANSCRIPT_UPDATE') {
+    if (msg.type === 'LIVE_INTERIM_ONLY') {
+      if (msg.meetingId && activeMeetingId && msg.meetingId !== activeMeetingId) return;
+      if (typeof msg.activeSpeaker === 'string' && msg.activeSpeaker.trim()) {
+        activeSpeakingJoinee = msg.activeSpeaker.trim();
+      }
+      interimText = typeof msg.interimText === 'string' ? msg.interimText : '';
+      renderInterimOnly();
+    } else if (msg.type === 'LIVE_TRANSCRIPT_UPDATE') {
       isRecording = msg.state === 'RECORDING';
       if (typeof msg.isPaused === 'boolean') isPaused = msg.isPaused;
       if (msg.meetingId && msg.meetingId !== activeMeetingId) {
