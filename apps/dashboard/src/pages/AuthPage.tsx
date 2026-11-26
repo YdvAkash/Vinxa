@@ -72,7 +72,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         const user = await api.register('user@vinxa.live', 'Password123!');
         onAuthSuccess(user);
       } catch (err: any) {
-        setError(err.message || 'Could not connect to backend server on port 8080.');
+        setError(err.message || 'Unable to sign in right now. Please try again in a moment.');
       }
     } finally {
       setLoading(false);
@@ -80,7 +80,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f7f6fc] text-slate-900 flex flex-col justify-center items-center p-6 relative overflow-hidden">
+    <div className="min-h-screen bg-[#f7f6fc] text-slate-900 flex flex-col justify-center items-center p-4 sm:p-6 relative overflow-hidden">
       {/* Ambient Lavender Glows */}
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-violet-400/20 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-purple-400/20 rounded-full blur-3xl pointer-events-none" />
@@ -103,7 +103,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         </div>
 
         {/* Auth Card */}
-        <div className="p-7 rounded-3xl bg-white border border-slate-200/90 shadow-xl shadow-violet-500/5 space-y-6">
+        <div className="p-5 sm:p-7 rounded-3xl bg-white border border-slate-200/90 shadow-xl shadow-violet-500/5 space-y-6">
           {/* Mode Tabs */}
           <div className="grid grid-cols-2 gap-2 p-1 rounded-2xl bg-[#f4f3f9] border border-slate-200/70">
             <button
@@ -236,16 +236,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
             type="button"
             onClick={handleQuickDemoLogin}
             disabled={loading}
-            className="w-full py-2.5 px-4 rounded-xl bg-violet-50 hover:bg-violet-100/80 border border-violet-200 text-xs font-bold text-violet-700 flex items-center justify-center space-x-2 transition cursor-pointer"
+            className="w-full py-2.5 px-4 rounded-xl bg-violet-50 hover:bg-violet-100/80 border border-violet-200 text-xs font-bold text-violet-700 flex items-center justify-center space-x-2 transition cursor-pointer text-center"
           >
-            <Sparkles className="w-4 h-4 text-violet-600" />
-            <span>Continue with Workspace Account (user@vinxa.live)</span>
+            <Sparkles className="w-4 h-4 text-violet-600 shrink-0" />
+            <span>Continue with Demo Workspace</span>
           </button>
         </div>
 
-        <div className="flex items-center justify-center space-x-2 text-[11px] text-slate-500">
-          <ShieldCheck className="w-3.5 h-3.5 text-violet-600" />
-          <span>Secured by JWT Authentication & Neon Cloud PostgreSQL</span>
+        <div className="flex items-center justify-center space-x-2 text-[11px] text-slate-500 text-center">
+          <ShieldCheck className="w-3.5 h-3.5 text-violet-600 shrink-0" />
+          <span>Protected with enterprise-grade encryption & privacy controls</span>
         </div>
       </div>
     </div>

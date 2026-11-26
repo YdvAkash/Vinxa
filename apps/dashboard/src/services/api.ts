@@ -120,7 +120,7 @@ async function authFetch(endpoint: string, options: RequestInit = {}) {
   }
 
   if (!res.ok) {
-    let errMsg = `API error ${res.status}: ${res.statusText}`;
+    let errMsg = 'Unable to complete your request right now. Please try again.';
     try {
       const errBody = await res.json();
       if (errBody?.message) errMsg = errBody.message;

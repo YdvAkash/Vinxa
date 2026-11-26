@@ -310,11 +310,11 @@ export const App: React.FC = () => {
           onToggleMobileMenu={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-7">
+        <main className="flex-1 overflow-y-auto p-3.5 sm:p-6 lg:p-7 pb-24 lg:pb-8">
           <div className="max-w-7xl mx-auto">
             {loading && meetings.length === 0 ? (
               <div className="py-24 text-center text-slate-500 text-sm font-semibold animate-pulse">
-                Connecting to Vinxa Live Intelligence Cloud...
+                Loading your workspace...
               </div>
             ) : (
               <>
@@ -492,24 +492,20 @@ export const App: React.FC = () => {
                                     )}
                                   </div>
                                   {pushedGlobalMap[item.id]?.success && (
-                                    <details className="mt-2 text-xs">
-                                      <summary className="text-emerald-700 font-bold cursor-pointer select-none">
-                                        ✓ Dispatched to Webhook (HTTP {pushedGlobalMap[item.id].statusCode}) — View Payload
-                                      </summary>
-                                      <pre className="mt-1.5 p-2.5 rounded-xl bg-slate-900 text-violet-100 text-[11px] font-mono overflow-x-auto">
-                                        {JSON.stringify(pushedGlobalMap[item.id].payloadSent, null, 2)}
-                                      </pre>
-                                    </details>
+                                    <p className="mt-2 text-xs text-emerald-700 font-bold flex items-center space-x-1.5">
+                                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                      <span>Task synced to connected project board</span>
+                                    </p>
                                   )}
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                              <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-center justify-end shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
                                 <button
                                   type="button"
                                   onClick={() => handlePushGlobalActionWebhook(meeting.id, item.id)}
                                   disabled={pushingGlobalId === item.id}
-                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 border transition cursor-pointer ${
+                                  className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center space-x-1.5 border transition cursor-pointer ${
                                     pushedGlobalMap[item.id]?.success
                                       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                       : 'bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200'
@@ -518,15 +514,15 @@ export const App: React.FC = () => {
                                   {pushedGlobalMap[item.id]?.success ? (
                                     <>
                                       <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                      <span>Pushed to DevOps / Jira</span>
+                                      <span>Synced to Project Board</span>
                                     </>
                                   ) : (
                                     <>
                                       <Send className="w-3.5 h-3.5" />
                                       <span>
                                         {pushingGlobalId === item.id
-                                          ? 'Pushing...'
-                                          : 'Push to DevOps / Jira'}
+                                          ? 'Syncing...'
+                                          : 'Send to Project Board'}
                                       </span>
                                     </>
                                   )}
@@ -535,7 +531,7 @@ export const App: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => handleSelectMeeting(meeting)}
-                                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center space-x-1 cursor-pointer"
+                                  className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center space-x-1 cursor-pointer"
                                 >
                                   <span>Open Meeting</span>
                                   <ArrowUpRight className="w-3.5 h-3.5" />

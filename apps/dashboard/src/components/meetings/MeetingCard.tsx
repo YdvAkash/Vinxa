@@ -75,13 +75,13 @@ export const MeetingCard: React.FC<MeetingCardProps> = ({ meeting, onSelect, onD
       className="p-5 rounded-2xl bg-white border border-slate-200/80 hover:border-violet-300 hover:shadow-md hover:shadow-violet-500/5 transition-all cursor-pointer group relative flex flex-col justify-between gap-4 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
     >
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center space-x-2">
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="flex flex-wrap items-center gap-1.5">
             <PlatformIcon platform={meeting.platform} className="w-8 h-8" />
             <PlatformBadge platform={meeting.platform} />
             <StatusBadge status={meeting.status} />
           </div>
-          <div className="flex items-center space-x-1">
+          <div className="flex items-center space-x-1 shrink-0">
             <button
               type="button"
               onClick={handleQuickShare}
@@ -99,7 +99,7 @@ export const MeetingCard: React.FC<MeetingCardProps> = ({ meeting, onSelect, onD
                 type="button"
                 onClick={handleDelete}
                 aria-label={`Delete ${meeting.title}`}
-                className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition"
                 title="Delete session"
               >
                 <Trash2 className="w-3.5 h-3.5" />

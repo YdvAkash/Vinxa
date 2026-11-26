@@ -89,7 +89,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       const result = await api.testWebhook(settings.webhookUrl, settings.webhookSecret);
       setWebhookTestResult(result);
     } catch (err: any) {
-      setWebhookTestError(err.message || 'Failed to dispatch test webhook.');
+      setWebhookTestError(err.message || 'Unable to connect to your project board right now.');
     } finally {
       setTestingWebhook(false);
     }
@@ -199,24 +199,24 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
       {/* Account Info Card */}
       {user && (
-        <div className="p-5 rounded-3xl bg-white border border-slate-200/80 shadow-2xs flex items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-violet-100 border border-violet-200 flex items-center justify-center text-violet-700">
+        <div className="p-4 sm:p-5 rounded-3xl bg-white border border-slate-200/80 shadow-2xs flex flex-col xs:flex-row xs:items-center justify-between gap-3">
+          <div className="flex items-center space-x-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-violet-100 border border-violet-200 flex items-center justify-center text-violet-700 shrink-0">
               <User className="w-5 h-5" />
             </div>
-            <div>
-              <p className="text-sm font-bold text-slate-900">{user.email}</p>
-              <p className="text-xs text-slate-400 font-mono">Workspace ID: {user.id}</p>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-slate-900 truncate">{user.email}</p>
+              <p className="text-xs text-slate-500">Personal & Team Workspace Account</p>
             </div>
           </div>
-          <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
-            Authenticated & Synced
+          <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold self-start xs:self-center shrink-0">
+            Account Active
           </span>
         </div>
       )}
 
       {/* Multi-Language Defaults */}
-      <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs space-y-4">
+      <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs space-y-4">
         <div className="flex items-center space-x-2">
           <Globe className="w-4 h-4 text-violet-600" />
           <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
@@ -227,7 +227,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-700 block">
-              Default Spoken Audio Language (STT)
+              Default Spoken Audio Language
             </label>
             <select
               value={settings.defaultSpokenLanguage}
@@ -266,16 +266,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       </div>
 
       {/* Audio Capture & Live Diagnostic Meter */}
-      <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs space-y-4">
+      <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs space-y-4">
         <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
-          Audio Pipeline & Microphone Diagnostics
+          Audio & Caption Preferences
         </h2>
 
-        <div className="flex items-center justify-between py-2.5 border-b border-slate-100">
+        <div className="flex items-center justify-between gap-4 py-2.5 border-b border-slate-100">
           <div>
-            <p className="text-sm font-bold text-slate-900">On-Screen Meeting Subtitles HUD</p>
+            <p className="text-sm font-bold text-slate-900">On-Screen Meeting Captions</p>
             <p className="text-xs text-slate-500">
-              Renders frosted-glass live captions & translations directly on the Google Meet / Teams / Zoom screen.
+              Displays live captions and translations directly on your Google Meet, Teams, or Zoom call screen.
             </p>
           </div>
           <input
@@ -284,11 +284,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             onChange={(e) =>
               setSettings({ ...settings, onScreenCaptionsEnabled: e.target.checked })
             }
-            className="w-4 h-4 accent-violet-600 rounded cursor-pointer"
+            className="w-4 h-4 accent-violet-600 rounded cursor-pointer shrink-0"
           />
         </div>
 
-        <div className="flex items-center justify-between py-2.5 border-b border-slate-100">
+        <div className="flex items-center justify-between gap-4 py-2.5 border-b border-slate-100">
           <div>
             <p className="text-sm font-bold text-slate-900">Smart Live Auto-Scroll</p>
             <p className="text-xs text-slate-500">
@@ -299,23 +299,23 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             type="checkbox"
             checked={settings.autoScrollLive}
             onChange={(e) => setSettings({ ...settings, autoScrollLive: e.target.checked })}
-            className="w-4 h-4 accent-violet-600 rounded cursor-pointer"
+            className="w-4 h-4 accent-violet-600 rounded cursor-pointer shrink-0"
           />
         </div>
 
         {/* Interactive Microphone Tester */}
         <div className="pt-2 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col xs:flex-row xs:items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-bold text-slate-900">Test Local Microphone Input</p>
+              <p className="text-sm font-bold text-slate-900">Test Microphone Input</p>
               <p className="text-xs text-slate-500">
-                Verify your microphone is capturing audio before joining a meeting.
+                Verify your microphone is picking up your voice before joining a meeting.
               </p>
             </div>
             <button
               type="button"
               onClick={testingMic ? stopMicTest : startMicTest}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition cursor-pointer shrink-0 ${
                 testingMic
                   ? 'bg-red-50 text-red-600 border border-red-200'
                   : 'bg-[#f4f3f9] hover:bg-violet-50 text-slate-700 border border-slate-200'
@@ -356,31 +356,31 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         </div>
       </div>
 
-      {/* Direct Webhook Dispatcher (Jira / Azure DevOps / Zapier / Power Automate) */}
-      <div className="p-6 rounded-3xl bg-white border border-violet-200/90 shadow-2xs space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center space-x-2">
-            <div className="w-7 h-7 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center">
+      {/* Project Management & Task Sync Integration */}
+      <div className="p-5 sm:p-6 rounded-3xl bg-white border border-violet-200/90 shadow-2xs space-y-4">
+        <div className="flex flex-col xs:flex-row xs:items-center justify-between gap-2.5">
+          <div className="flex items-start xs:items-center space-x-2.5">
+            <div className="w-7 h-7 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center shrink-0">
               <Webhook className="w-4 h-4" />
             </div>
             <div>
               <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
-                Direct Webhook Dispatcher (Azure DevOps & Jira)
+                Project Board & Task Sync (Jira & Team Tools)
               </h2>
               <p className="text-[11px] text-slate-500">
-                Push extracted meeting action items directly to Jira Automation, Azure Logic Apps, Power Automate, or Zapier.
+                Automatically send meeting action items to your team's project management board.
               </p>
             </div>
           </div>
-          <span className="px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 text-[10px] font-bold uppercase tracking-wider shrink-0">
-            Option 1 Active
+          <span className="px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 text-[10px] font-bold uppercase tracking-wider self-start xs:self-center shrink-0">
+            Integration Active
           </span>
         </div>
 
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="text-xs font-bold text-slate-700 block">
-              Incoming Webhook URL (Jira Automation / Azure Logic App / Power Automate)
+              Project Board Integration Link
             </label>
             <button
               type="button"
@@ -392,7 +392,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               }
               className="text-[11px] font-bold text-violet-600 hover:text-violet-800 cursor-pointer"
             >
-              Use Built-In Test Receiver
+              Use Default Demo Board
             </button>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
@@ -400,8 +400,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               type="url"
               value={settings.webhookUrl}
               onChange={(e) => setSettings({ ...settings, webhookUrl: e.target.value })}
-              placeholder="https://api-private.atlassian.com/automation/webhooks/jira/a/..."
-              className="flex-1 bg-[#fbfaff] border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-violet-500"
+              placeholder="Paste your Jira or project automation link..."
+              className="flex-1 bg-[#fbfaff] border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-violet-500 min-w-0"
             />
             <button
               type="button"
@@ -410,38 +410,38 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-sm shadow-violet-500/20 transition shrink-0 cursor-pointer"
             >
               <Send className="w-3.5 h-3.5" />
-              <span>{testingWebhook ? 'Dispatching...' : 'Send Test Payload'}</span>
+              <span>{testingWebhook ? 'Testing...' : 'Test Connection'}</span>
             </button>
           </div>
         </div>
 
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-slate-700 block">
-            Jira Webhook Secret <span className="text-slate-400 font-normal">(Optional — only required if Jira generates a Secret below the URL)</span>
+            Integration Passcode <span className="text-slate-400 font-normal">(Optional)</span>
           </label>
           <input
             type="password"
             value={settings.webhookSecret || ''}
             onChange={(e) => setSettings({ ...settings, webhookSecret: e.target.value })}
-            placeholder="Paste Jira Incoming Webhook Secret (sent as X-Automation-Webhook-Token header)"
-            className="w-full bg-[#fbfaff] border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-800 focus:outline-none focus:border-violet-500"
+            placeholder="Optional project board verification key"
+            className="w-full bg-[#fbfaff] border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-violet-500"
           />
         </div>
 
-        <div className="flex items-center justify-between py-2.5 border-t border-slate-100">
+        <div className="flex items-center justify-between gap-4 py-2.5 border-t border-slate-100">
           <div>
             <p className="text-sm font-bold text-slate-900">
-              Auto-Push Action Items When Meeting Analysis Finishes
+              Automatically Sync Action Items After Each Meeting
             </p>
             <p className="text-xs text-slate-500">
-              Automatically dispatches every newly extracted action item to your webhook URL as soon as Gemini finishes analyzing a meeting.
+              Sends newly extracted action items to your project board as soon as your meeting summary is ready.
             </p>
           </div>
           <input
             type="checkbox"
             checked={Boolean(settings.webhookAutoPush)}
             onChange={(e) => setSettings({ ...settings, webhookAutoPush: e.target.checked })}
-            className="w-4 h-4 accent-violet-600 rounded cursor-pointer"
+            className="w-4 h-4 accent-violet-600 rounded cursor-pointer shrink-0"
           />
         </div>
 
@@ -454,35 +454,23 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
         {webhookTestResult && (
           <div
-            className={`p-4 rounded-2xl border space-y-2 ${
+            className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
               webhookTestResult.success
-                ? 'bg-emerald-50/70 border-emerald-200'
-                : 'bg-red-50/70 border-red-200'
+                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-800'
+                : 'bg-red-50/70 border-red-200 text-red-800'
             }`}
           >
-            <div className="flex items-center justify-between">
-              <span
-                className={`text-xs font-extrabold ${
-                  webhookTestResult.success ? 'text-emerald-800' : 'text-red-800'
-                }`}
-              >
-                {webhookTestResult.success
-                  ? `✓ Webhook Delivered Successfully (HTTP ${webhookTestResult.statusCode})`
-                  : `✕ Webhook Delivery Failed (HTTP ${webhookTestResult.statusCode})`}
-              </span>
-              <span className="text-[11px] font-mono text-slate-500">
-                {webhookTestResult.responseMessage}
-              </span>
-            </div>
-            <pre className="p-3 rounded-xl bg-slate-900 text-violet-100 text-[11px] font-mono overflow-x-auto leading-relaxed">
-              {JSON.stringify(webhookTestResult.payloadSent, null, 2)}
-            </pre>
+            <span className="text-xs font-bold">
+              {webhookTestResult.success
+                ? '✓ Project Board Connection Verified Successfully'
+                : '✕ Unable to reach the specified integration link'}
+            </span>
           </div>
         )}
       </div>
 
       {/* Data Retention & Workspace Maintenance */}
-      <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs space-y-4">
+      <div className="p-5 sm:p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs space-y-4">
         <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
           Data Retention & Workspace Maintenance
         </h2>
@@ -510,7 +498,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             className="px-4 py-2 rounded-xl bg-[#f4f3f9] hover:bg-violet-50 text-slate-700 border border-slate-200 text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-violet-600" />
-            <span>Export Workspace Backup (.JSON)</span>
+            <span>Download Workspace Backup</span>
           </button>
 
           <button

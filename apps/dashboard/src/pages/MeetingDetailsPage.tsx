@@ -324,7 +324,7 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
             className="px-3.5 py-2 rounded-xl bg-violet-100 hover:bg-violet-200/80 text-xs font-bold text-violet-700 border border-violet-200 flex items-center space-x-1.5 transition cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${reanalyzing ? 'animate-spin' : ''}`} />
-            <span>{reanalyzing ? 'Re-analyzing with Gemini...' : 'Re-run AI Analysis'}</span>
+            <span>{reanalyzing ? 'Refreshing Summary...' : 'Refresh Summary'}</span>
           </button>
 
           <button
@@ -333,7 +333,7 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
             className="px-3.5 py-2 rounded-xl bg-white hover:bg-violet-50 text-xs font-semibold text-slate-700 border border-slate-200 flex items-center space-x-1.5 transition cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-violet-600" />
-            <span>Export Markdown</span>
+            <span>Download Notes</span>
           </button>
 
           <button
@@ -342,7 +342,7 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
             className="px-3.5 py-2 rounded-xl bg-white hover:bg-violet-50 text-xs font-semibold text-slate-700 border border-slate-200 flex items-center space-x-1.5 transition cursor-pointer"
           >
             <Share2 className="w-3.5 h-3.5 text-violet-600" />
-            <span>Export JSON</span>
+            <span>Download Report Data</span>
           </button>
 
           <button
@@ -380,26 +380,26 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
               }
               setIsEditingTitle(false);
             }}
-            className="flex items-center space-x-2"
+            className="flex flex-col xs:flex-row items-stretch xs:items-center gap-2"
           >
             <input
               type="text"
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
               autoFocus
-              className="flex-1 bg-[#fbfaff] border border-violet-400 rounded-xl px-3.5 py-2 text-lg font-extrabold text-slate-900 focus:outline-none"
+              className="flex-1 bg-[#fbfaff] border border-violet-400 rounded-xl px-3.5 py-2 text-base sm:text-lg font-extrabold text-slate-900 focus:outline-none"
             />
             <button
               type="submit"
-              className="px-4 py-2 rounded-xl bg-violet-600 text-white font-bold text-xs flex items-center space-x-1 cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-violet-600 text-white font-bold text-xs flex items-center justify-center space-x-1 cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>Save</span>
             </button>
           </form>
         ) : (
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+          <div className="flex items-start sm:items-center justify-between gap-3">
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight break-words">
               {meeting.title}
             </h1>
             {onRename && (
@@ -420,62 +420,62 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
         )}
 
         {meeting.meetingUrl && (
-          <p className="text-xs text-slate-400 font-mono truncate">URL: {meeting.meetingUrl}</p>
+          <p className="text-xs text-slate-400 truncate">Meeting Link: {meeting.meetingUrl}</p>
         )}
       </div>
 
       {/* Section Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
         <button
           type="button"
           onClick={() => setActiveTab('summary')}
-          className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+          className={`flex items-center justify-center sm:justify-start space-x-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
             activeTab === 'summary'
               ? 'bg-violet-600 text-white shadow-sm shadow-violet-500/20'
               : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200/80'
           }`}
         >
-          <FileText className="w-4 h-4" />
-          <span>Executive Summary & Decisions</span>
+          <FileText className="w-4 h-4 shrink-0" />
+          <span className="truncate">Summary & Decisions</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('actionItems')}
-          className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+          className={`flex items-center justify-center sm:justify-start space-x-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
             activeTab === 'actionItems'
               ? 'bg-violet-600 text-white shadow-sm shadow-violet-500/20'
               : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200/80'
           }`}
         >
-          <CheckSquare className="w-4 h-4" />
-          <span>Action Items ({actionItems.length})</span>
+          <CheckSquare className="w-4 h-4 shrink-0" />
+          <span className="truncate">Action Items ({actionItems.length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('transcript')}
-          className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+          className={`flex items-center justify-center sm:justify-start space-x-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
             activeTab === 'transcript'
               ? 'bg-violet-600 text-white shadow-sm shadow-violet-500/20'
               : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200/80'
           }`}
         >
-          <ListOrdered className="w-4 h-4" />
-          <span>Diarized Transcript ({transcript.length})</span>
+          <ListOrdered className="w-4 h-4 shrink-0" />
+          <span className="truncate">Full Transcript ({transcript.length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('copilot')}
-          className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+          className={`flex items-center justify-center sm:justify-start space-x-2 px-3.5 sm:px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
             activeTab === 'copilot'
               ? 'bg-violet-600 text-white shadow-sm shadow-violet-500/20'
               : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200/80'
           }`}
         >
-          <Sparkles className="w-4 h-4" />
-          <span>Ask AI About This Meeting</span>
+          <Sparkles className="w-4 h-4 shrink-0" />
+          <span className="truncate">Ask AI</span>
         </button>
       </div>
 
@@ -483,7 +483,7 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
       <div>
         {loading ? (
           <div className="py-12 text-center text-slate-500 text-xs font-semibold animate-pulse">
-            Loading meeting intelligence from Neon Cloud PostgreSQL...
+            Loading your meeting summary and transcript...
           </div>
         ) : (
           <>
@@ -650,19 +650,19 @@ export const MeetingDetailsPage: React.FC<MeetingDetailsPageProps> = ({
                 {publicShared && shareToken && (
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-700 block">
-                      Public Shareable URL
+                      Public Shareable Link
                     </label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-col xs:flex-row items-stretch xs:items-center gap-2">
                       <input
                         type="text"
                         readOnly
                         value={getPublicShareUrl(shareToken)}
-                        className="flex-1 bg-[#f4f3f9] border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-800 focus:outline-none"
+                        className="flex-1 bg-[#f4f3f9] border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 focus:outline-none min-w-0"
                       />
                       <button
                         type="button"
                         onClick={handleCopyShareUrl}
-                        className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold flex items-center space-x-1.5 shrink-0 cursor-pointer"
+                        className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shrink-0 cursor-pointer"
                       >
                         {copiedShareLink ? (
                           <>

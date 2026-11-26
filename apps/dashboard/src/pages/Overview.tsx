@@ -120,11 +120,11 @@ export const Overview: React.FC<OverviewProps> = ({
             Real-time captions, multi-language translation, AI summaries, key decisions and action items — all in one place.
           </p>
 
-          <div className="flex flex-wrap items-center gap-3 pt-1">
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-1">
             <button
               type="button"
               onClick={onGoToLive}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white font-bold text-xs flex items-center space-x-2 shadow-md shadow-violet-500/25 transition cursor-pointer"
+              className="w-full xs:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white font-bold text-xs flex items-center justify-center space-x-2 shadow-md shadow-violet-500/25 transition cursor-pointer"
             >
               <Play className="w-3.5 h-3.5 fill-white" />
               <span>{activeMeeting ? 'Live Session Active' : 'Open Live Monitor'}</span>
@@ -133,7 +133,7 @@ export const Overview: React.FC<OverviewProps> = ({
             <button
               type="button"
               onClick={() => setShowModal(true)}
-              className="px-4 py-2.5 rounded-xl bg-white hover:bg-violet-50 text-slate-800 font-bold text-xs flex items-center space-x-1.5 border border-slate-200/90 shadow-2xs transition cursor-pointer"
+              className="flex-1 xs:flex-initial px-4 py-2.5 rounded-xl bg-white hover:bg-violet-50 text-slate-800 font-bold text-xs flex items-center justify-center space-x-1.5 border border-slate-200/90 shadow-2xs transition cursor-pointer"
             >
               <Plus className="w-4 h-4 text-slate-700" />
               <span>New Session</span>
@@ -143,7 +143,7 @@ export const Overview: React.FC<OverviewProps> = ({
               <button
                 type="button"
                 onClick={() => onGoToCopilot()}
-                className="px-4 py-2.5 rounded-xl bg-white hover:bg-violet-50 text-slate-800 font-bold text-xs flex items-center space-x-1.5 border border-slate-200/90 shadow-2xs transition cursor-pointer"
+                className="flex-1 xs:flex-initial px-4 py-2.5 rounded-xl bg-white hover:bg-violet-50 text-slate-800 font-bold text-xs flex items-center justify-center space-x-1.5 border border-slate-200/90 shadow-2xs transition cursor-pointer"
               >
                 <Sparkles className="w-4 h-4 text-violet-600" />
                 <span>Ask Vinxa AI</span>
@@ -289,7 +289,7 @@ export const Overview: React.FC<OverviewProps> = ({
                 <Users className="w-4 h-4" />
               </div>
               <div>
-                <div className="text-xs font-semibold text-slate-500">Diarized Turns</div>
+                <div className="text-xs font-semibold text-slate-500">Spoken Turns</div>
                 <div className="text-2xl font-extrabold text-slate-900 leading-tight">
                   {totalTranscriptTurns}
                 </div>
@@ -297,7 +297,7 @@ export const Overview: React.FC<OverviewProps> = ({
             </div>
             <div className="text-[11px] font-bold text-emerald-600 flex items-center space-x-1 pt-0.5">
               <span>↑ Searchable</span>
-              <span className="text-slate-400 font-normal">in Neon DB</span>
+              <span className="text-slate-400 font-normal">across workspace</span>
             </div>
           </div>
           <svg className="w-20 h-10 text-sky-500 shrink-0" viewBox="0 0 80 36" fill="none">
@@ -434,110 +434,102 @@ export const Overview: React.FC<OverviewProps> = ({
                   </div>
 
                   {/* Right badges & action icons */}
-                  <div className="flex items-center space-x-2 shrink-0 self-end sm:self-center">
-                    <StatusBadge status={meeting.status} />
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 self-stretch sm:self-center justify-between sm:justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <StatusBadge status={meeting.status} />
 
-                    <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 border border-violet-200/80 text-[11px] font-semibold">
-                      <Sparkles className="w-3 h-3 text-violet-600" />
-                      <span>AI Summary</span>
-                    </span>
+                      <span className="hidden xs:inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 border border-violet-200/80 text-[11px] font-semibold">
+                        <Sparkles className="w-3 h-3 text-violet-600" />
+                        <span>AI Summary</span>
+                      </span>
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={(e) => handleQuickShareLink(e, meeting)}
-                      title="Copy Public Share Link"
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center space-x-1 border transition ${
-                        copiedId === meeting.id
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-white hover:bg-violet-50 text-slate-600 hover:text-violet-700 border-slate-200'
-                      }`}
-                    >
-                      {copiedId === meeting.id ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-600" />
-                          <span>Link Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Link2 className="w-3 h-3 text-violet-600" />
-                          <span>{sharingId === meeting.id ? 'Sharing...' : 'Share'}</span>
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectMeeting(meeting);
-                      }}
-                      title="Play / View Transcript"
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-violet-700 hover:bg-violet-100/70 transition"
-                    >
-                      <Play className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectMeeting(meeting);
-                      }}
-                      title="Open Full Analysis"
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-violet-700 hover:bg-violet-100/70 transition"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </button>
-
-                    {onDeleteMeeting && (
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenMenuId(openMenuId === meeting.id ? null : meeting.id);
-                          }}
-                          title="More actions"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-                        >
-                          <MoreVertical className="w-3.5 h-3.5" />
-                        </button>
-
-                        {openMenuId === meeting.id && (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            className="absolute right-0 mt-1 w-40 rounded-xl bg-white border border-slate-200 shadow-lg py-1 z-30"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenMenuId(null);
-                                onSelectMeeting(meeting);
-                              }}
-                              className="w-full text-left px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-violet-50 flex items-center space-x-2"
-                            >
-                              <ArrowUpRight className="w-3.5 h-3.5 text-violet-600" />
-                              <span>Open Analysis</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenMenuId(null);
-                                if (
-                                  window.confirm(`Delete meeting session "${meeting.title}"?`)
-                                ) {
-                                  onDeleteMeeting(meeting.id);
-                                }
-                              }}
-                              className="w-full text-left px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center space-x-2"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              <span>Delete Session</span>
-                            </button>
-                          </div>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => handleQuickShareLink(e, meeting)}
+                        title="Copy Public Share Link"
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center space-x-1 border transition ${
+                          copiedId === meeting.id
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-white hover:bg-violet-50 text-slate-600 hover:text-violet-700 border-slate-200'
+                        }`}
+                      >
+                        {copiedId === meeting.id ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            <span>Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Link2 className="w-3 h-3 text-violet-600" />
+                            <span>{sharingId === meeting.id ? 'Sharing...' : 'Share'}</span>
+                          </>
                         )}
-                      </div>
-                    )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelectMeeting(meeting);
+                        }}
+                        title="Open Full Analysis"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-violet-700 hover:bg-violet-100/70 transition"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+
+                      {onDeleteMeeting && (
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuId(openMenuId === meeting.id ? null : meeting.id);
+                            }}
+                            title="More actions"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                          >
+                            <MoreVertical className="w-3.5 h-3.5" />
+                          </button>
+
+                          {openMenuId === meeting.id && (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="absolute right-0 mt-1 w-40 rounded-xl bg-white border border-slate-200 shadow-lg py-1 z-30"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  onSelectMeeting(meeting);
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-violet-50 flex items-center space-x-2"
+                              >
+                                <ArrowUpRight className="w-3.5 h-3.5 text-violet-600" />
+                                <span>Open Analysis</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  if (
+                                    window.confirm(`Delete meeting session "${meeting.title}"?`)
+                                  ) {
+                                    onDeleteMeeting(meeting.id);
+                                  }
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center space-x-2"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Delete Session</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -566,7 +558,7 @@ export const Overview: React.FC<OverviewProps> = ({
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1.5">Platform</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 xs:grid-cols-3 gap-2">
                   {[
                     { id: 'GOOGLE_MEET', label: 'Google Meet', icon: meetIconUrl },
                     { id: 'MICROSOFT_TEAMS', label: 'MS Teams', icon: teamsIconUrl },

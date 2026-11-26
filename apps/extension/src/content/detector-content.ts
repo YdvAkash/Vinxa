@@ -1014,8 +1014,8 @@
 
   const downloadBtn = document.createElement('button');
   downloadBtn.className = 'btn';
-  downloadBtn.title = 'Download Live Transcript (.MD)';
-  downloadBtn.textContent = '↓ .MD';
+  downloadBtn.title = 'Save Live Transcript Notes';
+  downloadBtn.textContent = '↓ Save';
   downloadBtn.addEventListener('mousedown', (e) => e.stopPropagation());
   downloadBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -1025,7 +1025,7 @@
       `- **Platform:** ${platform}`,
       `- **Exported:** ${new Date().toLocaleString()}`,
       '',
-      '## Diarized Transcript',
+      '## Meeting Transcript',
       ...segments.map((s) => {
         const tr =
           targetTranslation !== 'ORIGINAL' && translationsCache[s.id]

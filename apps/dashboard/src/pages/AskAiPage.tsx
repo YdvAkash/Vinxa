@@ -188,29 +188,29 @@ export const AskAiPage: React.FC<AskAiPageProps> = ({
     <div className="flex flex-col h-full space-y-5">
       {/* Header Banner */}
       {!fixedMeeting && (
-        <div className="p-6 rounded-3xl bg-gradient-to-r from-[#f3effe] via-[#ebe4ff] to-[#e4dcff] border border-violet-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
+        <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-[#f3effe] via-[#ebe4ff] to-[#e4dcff] border border-violet-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
           <div className="space-y-1">
             <div className="flex items-center space-x-2 text-violet-600 text-[11px] font-extrabold uppercase tracking-wider">
               <Sparkles className="w-4 h-4" />
-              <span>Vinxa AI Meeting Copilot · Powered by Google Gemini</span>
+              <span>Vinxa AI Meeting Assistant</span>
             </div>
-            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
               Ask Anything Across Your Past Meetings
             </h1>
             <p className="text-slate-600 text-xs">
-              Grounded in your real-time transcripts, confirmed decisions, and action items stored in Neon PostgreSQL.
+              Get instant, clear answers based on your saved meeting transcripts, confirmed decisions, and action items.
             </p>
           </div>
 
           {/* Scope Selector */}
-          <div className="flex items-center space-x-2.5 shrink-0">
-            <div className="flex items-center space-x-2 bg-white border border-violet-200 rounded-xl px-3.5 py-2 shadow-2xs">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="flex items-center space-x-2 bg-white border border-violet-200 rounded-xl px-3.5 py-2 shadow-2xs flex-1 sm:flex-initial min-w-0">
               <Filter className="w-3.5 h-3.5 text-violet-600 shrink-0" />
-              <span className="text-xs text-slate-500 font-medium">Scope:</span>
+              <span className="text-xs text-slate-500 font-medium shrink-0">Scope:</span>
               <select
                 value={selectedMeetingId}
                 onChange={(e) => setSelectedMeetingId(e.target.value)}
-                className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none max-w-[230px]"
+                className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none w-full sm:max-w-[230px] truncate"
               >
                 <option value="ALL">All Past Meetings ({meetings.length} sessions)</option>
                 {meetings.map((m) => (
@@ -236,16 +236,16 @@ export const AskAiPage: React.FC<AskAiPageProps> = ({
       )}
 
       {/* Main Chat Container */}
-      <div className="flex-1 rounded-3xl bg-white border border-slate-200/80 shadow-2xs flex flex-col overflow-hidden min-h-[480px]">
+      <div className="flex-1 rounded-3xl bg-white border border-slate-200/80 shadow-2xs flex flex-col overflow-hidden min-h-[440px] sm:min-h-[480px]">
         {/* Scope status bar */}
-        <div className="px-5 py-3 bg-[#fbfaff] border-b border-slate-200/70 flex items-center justify-between text-xs">
-          <div className="flex items-center space-x-2 text-slate-500">
-            <ShieldCheck className="w-4 h-4 text-violet-600" />
-            <span>
-              Knowledge Base:{' '}
+        <div className="px-4 sm:px-5 py-3 bg-[#fbfaff] border-b border-slate-200/70 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center space-x-2 text-slate-500 min-w-0">
+            <ShieldCheck className="w-4 h-4 text-violet-600 shrink-0" />
+            <span className="truncate">
+              Searching in:{' '}
               <strong className="text-slate-800">
                 {activeScopeMeeting
-                  ? `Single Meeting — "${activeScopeMeeting.title}"`
+                  ? `"${activeScopeMeeting.title}"`
                   : `All Past Meetings (${meetings.length} sessions)`}
               </strong>
             </span>
@@ -253,7 +253,7 @@ export const AskAiPage: React.FC<AskAiPageProps> = ({
           {fixedMeeting && messages.length > 0 && (
             <button
               onClick={handleClear}
-              className="text-slate-500 hover:text-violet-700 flex items-center space-x-1 text-xs font-semibold"
+              className="text-slate-500 hover:text-violet-700 flex items-center space-x-1 text-xs font-semibold shrink-0"
             >
               <RotateCcw className="w-3 h-3" />
               <span>Reset Chat</span>
@@ -262,21 +262,21 @@ export const AskAiPage: React.FC<AskAiPageProps> = ({
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 sm:space-y-6">
           {messages.length === 0 ? (
-            <div className="py-8 max-w-2xl mx-auto text-center space-y-6">
+            <div className="py-6 sm:py-8 max-w-2xl mx-auto text-center space-y-6">
               <div className="w-14 h-14 rounded-2xl bg-violet-100 border border-violet-200 flex items-center justify-center mx-auto text-violet-600 shadow-sm">
                 <Bot className="w-7 h-7" />
               </div>
 
               <div className="space-y-2">
-                <h3 className="text-lg font-extrabold text-slate-900">
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
                   {activeScopeMeeting
                     ? `Ask AI about "${activeScopeMeeting.title}"`
                     : 'What would you like to know from your past meetings?'}
                 </h3>
                 <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                  Vinxa AI analyzes your diarized transcripts, decisions, and action items to give you instant answers with verifiable speaker citations.
+                  Vinxa AI reviews your meeting conversations, confirmed decisions, and action items to give you clear, comprehensive explanations.
                 </p>
               </div>
 
@@ -303,7 +303,7 @@ export const AskAiPage: React.FC<AskAiPageProps> = ({
             messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex items-start gap-3.5 ${
+                className={`flex items-start gap-2.5 sm:gap-3.5 ${
                   msg.role === 'user' ? 'justify-end' : 'justify-start'
                 }`}
               >
@@ -314,10 +314,10 @@ export const AskAiPage: React.FC<AskAiPageProps> = ({
                 )}
 
                 <div
-                  className={`max-w-3xl rounded-2xl p-4 ${
+                  className={`max-w-3xl rounded-2xl p-3.5 sm:p-4 break-words ${
                     msg.role === 'user'
-                      ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white font-medium ml-12 shadow-sm'
-                      : 'bg-[#fbfaff] border border-slate-200/90 text-slate-800 mr-4 w-full'
+                      ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white font-medium ml-4 sm:ml-12 shadow-sm'
+                      : 'bg-[#fbfaff] border border-slate-200/90 text-slate-800 mr-2 sm:mr-4 flex-1 min-w-0'
                   }`}
                 >
                   {msg.role === 'user' ? (
@@ -337,14 +337,14 @@ export const AskAiPage: React.FC<AskAiPageProps> = ({
           )}
 
           {isLoading && (
-            <div className="flex items-start gap-3.5">
+            <div className="flex items-start gap-3">
               <div className="w-8 h-8 rounded-xl bg-violet-100 border border-violet-200 flex items-center justify-center text-violet-600 shrink-0">
                 <Sparkles className="w-4 h-4 animate-spin" />
               </div>
-              <div className="p-4 rounded-2xl bg-[#fbfaff] border border-slate-200 text-xs text-slate-600 flex items-center space-x-2">
-                <span className="w-2 h-2 rounded-full bg-violet-600 animate-ping" />
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-[#fbfaff] border border-slate-200 text-xs text-slate-600 flex items-center space-x-2">
+                <span className="w-2 h-2 rounded-full bg-violet-600 animate-ping shrink-0" />
                 <span>
-                  Analyzing meeting transcripts, decisions, and action items with Google Gemini...
+                  Reviewing your meeting notes, decisions, and action items...
                 </span>
               </div>
             </div>
@@ -365,7 +365,7 @@ export const AskAiPage: React.FC<AskAiPageProps> = ({
             e.preventDefault();
             handleAsk();
           }}
-          className="p-4 bg-[#fbfaff] border-t border-slate-200/80 flex items-center gap-3"
+          className="p-3 sm:p-4 bg-[#fbfaff] border-t border-slate-200/80 flex flex-col xs:flex-row items-stretch xs:items-center gap-2.5 sm:gap-3"
         >
           <input
             type="text"
@@ -375,14 +375,14 @@ export const AskAiPage: React.FC<AskAiPageProps> = ({
             placeholder={
               activeScopeMeeting
                 ? `Ask a question about "${activeScopeMeeting.title}"...`
-                : 'Ask any question across your past meetings (e.g., "What did we decide about the launch date?")...'
+                : 'Ask any question across your meetings...'
             }
-            className="flex-1 bg-white border border-slate-200 focus:border-violet-400 rounded-xl px-4 py-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none transition"
+            className="flex-1 bg-white border border-slate-200 focus:border-violet-400 rounded-xl px-3.5 sm:px-4 py-3 text-xs text-slate-800 placeholder-slate-400 focus:outline-none transition min-w-0"
           />
           <button
             type="submit"
             disabled={!question.trim() || isLoading}
-            className="px-5 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 disabled:opacity-40 text-white font-bold text-xs flex items-center space-x-2 shadow-md shadow-violet-500/20 transition shrink-0 cursor-pointer"
+            className="px-5 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 disabled:opacity-40 text-white font-bold text-xs flex items-center justify-center space-x-2 shadow-md shadow-violet-500/20 transition shrink-0 cursor-pointer"
           >
             <Send className="w-3.5 h-3.5" />
             <span>Ask AI</span>

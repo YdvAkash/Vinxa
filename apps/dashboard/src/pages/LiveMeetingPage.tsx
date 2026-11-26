@@ -273,9 +273,9 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Active Session Header Bar (Scroll & Transcript buttons removed from here) */}
-      <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="space-y-1.5">
+      {/* Active Session Header Bar */}
+      <div className="p-4 sm:p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="space-y-1.5 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <PlatformIcon platform={meeting.platform} className="w-7 h-7" />
             <PlatformBadge platform={meeting.platform} />
@@ -288,7 +288,7 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
                   if (found) onSelectLiveMeeting(found);
                 }}
                 aria-label="Switch meeting session"
-                className="bg-[#f4f3f9] border border-slate-200 rounded-xl px-2.5 py-1 text-xs font-semibold text-slate-800 focus:outline-none focus:border-violet-400"
+                className="max-w-full bg-[#f4f3f9] border border-slate-200 rounded-xl px-2.5 py-1 text-xs font-semibold text-slate-800 focus:outline-none focus:border-violet-400 truncate"
               >
                 {allMeetings.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -304,20 +304,22 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
               </select>
             )}
           </div>
-          <h2 className="text-lg sm:text-xl font-extrabold text-slate-900">{meeting.title}</h2>
-          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+          <h2 className="text-lg sm:text-xl font-extrabold text-slate-900 break-words">
+            {meeting.title}
+          </h2>
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 text-xs text-slate-500">
             <div className="flex items-center space-x-1">
               <Users className="w-3.5 h-3.5 text-violet-500" />
               <span>{uniqueSpeakers} Identified Speaker(s)</span>
             </div>
-            <span>·</span>
+            <span className="hidden xs:inline">·</span>
             <div className="flex items-center space-x-1">
               <Activity
                 className={`w-3.5 h-3.5 ${connected ? 'text-emerald-600' : 'text-amber-500'}`}
               />
               <span className={connected ? 'text-emerald-700 font-semibold' : 'text-amber-600'}>
                 {connected
-                  ? 'Live WebSocket + Neon DB Sync Connected'
+                  ? 'Live Stream Active & Saved'
                   : 'Reconnecting Live Stream...'}
               </span>
             </div>
@@ -330,15 +332,15 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
             <button
               type="button"
               onClick={onStopMeeting}
-              className="px-4 py-2 rounded-xl bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 text-xs font-bold flex items-center space-x-1.5 transition cursor-pointer"
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 text-xs font-bold flex items-center justify-center space-x-1.5 transition cursor-pointer"
             >
               <StopCircle className="w-4 h-4 text-red-600" />
               <span>Stop & Finalize Meeting</span>
             </button>
           ) : isProcessing ? (
-            <div className="px-4 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold flex items-center space-x-2 animate-pulse">
+            <div className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold flex items-center justify-center space-x-2 animate-pulse">
               <Sparkles className="w-4 h-4 animate-spin" />
-              <span>Generating AI Intelligence...</span>
+              <span>Generating AI Summary...</span>
             </div>
           ) : (
             <div className="px-3.5 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-semibold">
@@ -349,13 +351,13 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
       </div>
 
       {/* Multi-Language Controls Bar */}
-      <div className="p-4 rounded-3xl bg-white border border-slate-200/80 shadow-2xs grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="p-4 rounded-3xl bg-white border border-slate-200/80 shadow-2xs grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
         <div className="flex items-center space-x-3 bg-[#fbfaff] border border-slate-200/80 rounded-2xl px-4 py-2.5">
           <Globe className="w-4 h-4 text-violet-600 shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Spoken Audio Language (Deepgram Nova-2)
+                Spoken Audio Language
               </label>
               {switchingLang && (
                 <span className="text-[10px] text-violet-600 font-bold animate-pulse">
@@ -382,7 +384,7 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Live Bilingual Translation (Google Gemini)
+                Live Bilingual Translation
               </label>
               {translating && (
                 <span className="text-[10px] text-violet-600 font-bold animate-pulse">
@@ -407,54 +409,54 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
 
       {/* Automatic Joinee-to-Speaker Name Assignment Bar */}
       <div className="p-4 rounded-3xl bg-white border border-slate-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="flex items-center space-x-3 min-w-0">
+        <div className="flex items-start sm:items-center space-x-3 min-w-0">
           <div className="w-8 h-8 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center shrink-0">
             <Users className="w-4 h-4" />
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-extrabold text-slate-900">
-                Auto-Assign Speaker Names from Meeting Joinees
+                Automatic Speaker Name Matching
               </span>
               <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
                 Auto-Detected from Call & Speech
               </span>
             </div>
-            <p className="text-[11px] text-slate-500 truncate">
+            <p className="text-[11px] text-slate-500 break-words">
               {syncedJoinees.length > 0
-                ? `Active Joinees Mapped: ${syncedJoinees.join(' · ')}`
-                : 'Joinees are automatically detected from Google Meet / Teams / Zoom tiles or self-introductions.'}
+                ? `Participants Matched: ${syncedJoinees.join(' · ')}`
+                : 'Participants are automatically matched from Google Meet, Teams, or Zoom call tiles.'}
             </p>
           </div>
         </div>
 
-        <form onSubmit={handleSyncJoinees} className="flex items-center gap-2 shrink-0">
+        <form onSubmit={handleSyncJoinees} className="flex flex-col xs:flex-row items-stretch xs:items-center gap-2 shrink-0 w-full md:w-auto">
           <input
             type="text"
             value={joineeInput}
             onChange={(e) => setJoineeInput(e.target.value)}
-            placeholder="Add joinees (e.g. Akash, Priya, Rohit)"
-            className="bg-[#fbfaff] border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-violet-400 w-56 sm:w-64"
+            placeholder="Add participant names (e.g. Akash, Priya)"
+            className="bg-[#fbfaff] border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-violet-400 flex-1 md:w-60"
           />
           <button
             type="submit"
             disabled={!joineeInput.trim() || syncingJoinees}
-            className="px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-xs font-bold transition cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-xs font-bold transition cursor-pointer shrink-0"
           >
-            {syncingJoinees ? 'Assigning...' : 'Auto-Assign'}
+            {syncingJoinees ? 'Matching...' : 'Match Names'}
           </button>
         </form>
       </div>
 
-      {/* Main Transcript Stream Card (Transcript Copy & Download buttons placed here) */}
-      <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs space-y-4 relative">
+      {/* Main Transcript Stream Card */}
+      <div className="p-4 sm:p-6 rounded-3xl bg-white border border-slate-200/80 shadow-2xs space-y-4 relative">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
           <div className="flex items-center space-x-2">
             <Radio
               className={`w-4 h-4 ${connected ? 'text-violet-600 animate-pulse' : 'text-slate-400'}`}
             />
             <h3 className="font-extrabold text-slate-900 text-sm">
-              Real-Time Multi-Language Diarized Transcript Stream
+              Real-Time Live Transcript
             </h3>
           </div>
 
@@ -464,8 +466,8 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
                 Active Speech
               </span>
             )}
-            <span className="text-xs text-slate-500 font-mono font-semibold mr-1">
-              {segments.length} Finalized Turn(s)
+            <span className="text-xs text-slate-500 font-semibold mr-1">
+              {segments.length} Spoken Turn(s)
             </span>
 
             {segments.length > 0 && (
@@ -494,7 +496,7 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
                   className="px-3 py-1.5 rounded-xl bg-[#f4f3f9] hover:bg-violet-50 text-slate-700 border border-slate-200 text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Download .MD</span>
+                  <span>Download Notes</span>
                 </button>
               </>
             )}
@@ -502,19 +504,19 @@ export const LiveMeetingPage: React.FC<LiveMeetingPageProps> = ({
         </div>
 
         {segments.length === 0 && !interimText ? (
-          <div className="py-16 text-center text-slate-500 space-y-2">
+          <div className="py-14 sm:py-16 text-center text-slate-500 space-y-2">
             <div className="w-11 h-11 rounded-2xl bg-violet-100 border border-violet-200 flex items-center justify-center mx-auto text-violet-600">
               <Radio className="w-5 h-5 animate-pulse" />
             </div>
             <p className="text-sm text-slate-800 font-bold">Listening for live meeting speech...</p>
             <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Speak in your meeting tab. Live captions appear both on your meeting screen (frosted glass HUD) and right here in real time.
+              Speak in your meeting tab. Live captions appear both on your meeting screen and right here in real time.
             </p>
           </div>
         ) : (
           <div
             ref={scrollContainerRef}
-            className="max-h-[520px] overflow-y-auto pr-2 space-y-2"
+            className="max-h-[520px] overflow-y-auto pr-1 sm:pr-2 space-y-2"
           >
             <TranscriptFeed
               segments={segments}

@@ -156,17 +156,13 @@ export const TranscriptFeed: React.FC<TranscriptFeedProps> = React.memo(({
                           setEditingSpeakerKey(seg.speakerKey);
                         }}
                         title="Rename speaker across this meeting"
-                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-slate-400 hover:text-violet-600 p-0.5 transition"
+                        className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 text-slate-400 hover:text-violet-600 p-1 transition"
                       >
                         <Edit3 className="w-3 h-3" />
                       </button>
                     )}
                   </div>
                 )}
-
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 font-mono">
-                  {seg.speakerKey}
-                </span>
 
                 {isLatest && !interimText && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-semibold">
@@ -179,8 +175,8 @@ export const TranscriptFeed: React.FC<TranscriptFeedProps> = React.memo(({
                 <button
                   type="button"
                   onClick={(e) => handleCopyTurn(e, seg)}
-                  title="Copy utterance"
-                  className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-700 transition"
+                  title="Copy quote"
+                  className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 p-1 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-700 transition"
                 >
                   {copiedId === seg.id ? (
                     <Check className="w-3 h-3 text-emerald-600" />
@@ -194,10 +190,10 @@ export const TranscriptFeed: React.FC<TranscriptFeedProps> = React.memo(({
               </div>
             </div>
 
-            <p className="text-sm text-slate-800 leading-relaxed pl-7 break-words">{seg.text}</p>
+            <p className="text-sm text-slate-800 leading-relaxed pl-0 sm:pl-7 break-words">{seg.text}</p>
 
             {translatedText && (
-              <div className="mt-2 ml-7 p-2.5 rounded-xl bg-violet-50/80 border border-violet-200/70 space-y-0.5">
+              <div className="mt-2 ml-0 sm:ml-7 p-2.5 rounded-xl bg-violet-50/80 border border-violet-200/70 space-y-0.5">
                 <div className="flex items-center space-x-1 text-[10px] font-bold uppercase tracking-wider text-violet-600">
                   <Languages className="w-3 h-3" />
                   <span>{targetLanguageLabel || 'Live Translation'}</span>

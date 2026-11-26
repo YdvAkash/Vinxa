@@ -99,13 +99,13 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
       if (!res.success) {
         setPushErrorMap((prev) => ({
           ...prev,
-          [item.id]: res.responseMessage || `HTTP ${res.statusCode}`
+          [item.id]: 'Unable to sync task to your project board right now.'
         }));
       }
     } catch (err: any) {
       setPushErrorMap((prev) => ({
         ...prev,
-        [item.id]: err.message || 'Webhook dispatch failed'
+        [item.id]: err.message || 'Unable to sync task right now.'
       }));
     } finally {
       setPushingId(null);
@@ -118,7 +118,7 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
     setPushAllSummary(null);
     try {
       const res = await api.pushAllMeetingActionsToWebhook(meetingId);
-      setPushAllSummary(`Dispatched ${res.succeeded}/${res.total} Jira task(s) to Webhook.`);
+      setPushAllSummary(`Synced ${res.succeeded} of ${res.total} task(s) to your project board.`);
       const nextMap: Record<string, WebhookDispatchResult> = { ...pushedMap };
       itemsList.forEach((it, idx) => {
         if (res.results && res.results[idx]) {
@@ -127,7 +127,7 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
       });
       setPushedMap(nextMap);
     } catch (err: any) {
-      setPushAllSummary(`Error: ${err.message || 'Webhook dispatch failed'}`);
+      setPushAllSummary(`Unable to sync tasks right now.`);
     } finally {
       setPushingAll(false);
     }
@@ -138,10 +138,10 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
       <div className="p-10 text-center text-slate-500 bg-white border border-dashed border-slate-200 rounded-2xl space-y-2">
         <AlertCircle className="w-6 h-6 mx-auto text-violet-400" />
         <p className="text-sm font-semibold text-slate-700">
-          No Jira action items extracted for this meeting.
+          No action items extracted for this meeting.
         </p>
         <p className="text-xs text-slate-500">
-          Jira tasks are generated automatically when deliverables, owners, or deadlines are discussed.
+          Action items are generated automatically when deliverables, owners, or deadlines are discussed.
         </p>
       </div>
     );
@@ -150,14 +150,14 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
   return (
     <div className="space-y-3.5 font-sans">
       {meetingId && itemsList.length > 0 && (
-        <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+        <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 flex flex-col xs:flex-row xs:items-center justify-between gap-3 shadow-2xs">
           <div className="flex items-center space-x-2 text-xs text-slate-600">
-            <Webhook className="w-4 h-4 text-violet-600" />
+            <Webhook className="w-4 h-4 text-violet-600 shrink-0" />
             <span className="font-semibold">
-              Jira Backlog Tasks Ready for Jira Automation & Azure DevOps
+              Action Items Ready for Jira & Project Board Sync
             </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {pushAllSummary && (
               <span className="text-xs font-bold text-emerald-700">{pushAllSummary}</span>
             )}
@@ -165,13 +165,13 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
               type="button"
               onClick={handlePushAll}
               disabled={pushingAll}
-              className="px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-bold flex items-center space-x-1.5 shadow-xs transition cursor-pointer"
+              className="w-full xs:w-auto px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center space-x-1.5 shadow-xs transition cursor-pointer"
             >
               <Send className="w-3.5 h-3.5" />
               <span>
                 {pushingAll
-                  ? 'Pushing All...'
-                  : `Push All (${itemsList.length}) to DevOps / Jira`}
+                  ? 'Syncing All...'
+                  : `Send All (${itemsList.length}) to Project Board`}
               </span>
             </button>
           </div>
@@ -277,24 +277,20 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
                   )}
 
                   {pushResult?.success && (
-                    <details className="mt-2.5 text-xs">
-                      <summary className="text-emerald-700 font-bold cursor-pointer select-none">
-                        ✓ Dispatched to Webhook (HTTP {pushResult.statusCode}) — View Jira Payload
-                      </summary>
-                      <pre className="mt-1.5 p-2.5 rounded-xl bg-slate-900 text-violet-100 text-[11px] font-mono overflow-x-auto">
-                        {JSON.stringify(pushResult.payloadSent, null, 2)}
-                      </pre>
-                    </details>
+                    <p className="mt-2 text-xs text-emerald-700 font-bold flex items-center space-x-1.5">
+                      <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Task synced to connected project board</span>
+                    </p>
                   )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 self-end sm:self-start shrink-0">
+              <div className="flex items-center gap-2 self-stretch sm:self-start justify-end shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
                 <button
                   type="button"
                   onClick={() => handlePushSingle(item)}
                   disabled={isPushing}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-1.5 border transition cursor-pointer ${
+                  className={`w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 border transition cursor-pointer ${
                     pushResult?.success
                       ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                       : 'bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200'
@@ -303,12 +299,12 @@ export const ActionItemsView: React.FC<ActionItemsViewProps> = ({
                   {pushResult?.success ? (
                     <>
                       <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Synced to Jira</span>
+                      <span>Synced to Project Board</span>
                     </>
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>{isPushing ? 'Syncing...' : 'Push to Jira / DevOps'}</span>
+                      <span>{isPushing ? 'Syncing...' : 'Send to Project Board'}</span>
                     </>
                   )}
                 </button>

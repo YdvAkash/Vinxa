@@ -40,7 +40,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
   return (
     <div className="space-y-6">
       {/* Header & Filter Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-slate-200/80 rounded-3xl p-6 shadow-2xs">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-2xs">
         <div>
           <h1 className="text-xl font-extrabold text-slate-900 flex items-center space-x-2.5">
             <div className="w-8 h-8 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center">
@@ -49,18 +49,18 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
             <span>Meetings Archive</span>
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Browse, filter, and manage all recorded meeting sessions in Neon Cloud PostgreSQL.
+            Browse, filter, and manage all your recorded meeting sessions and summaries.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center space-x-1.5 bg-[#f4f3f9] border border-slate-200/80 rounded-xl px-3 py-2">
-            <Filter className="w-3.5 h-3.5 text-violet-600" />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center space-x-1.5 bg-[#f4f3f9] border border-slate-200/80 rounded-xl px-3 py-2 flex-1 xs:flex-initial">
+            <Filter className="w-3.5 h-3.5 text-violet-600 shrink-0" />
             <select
               value={platformFilter}
               onChange={(e) => setPlatformFilter(e.target.value)}
               aria-label="Filter by platform"
-              className="bg-transparent text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
+              className="w-full bg-transparent text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
             >
               <option value="ALL">All Platforms</option>
               <option value="GOOGLE_MEET">Google Meet</option>
@@ -69,12 +69,12 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
             </select>
           </div>
 
-          <div className="flex items-center space-x-1.5 bg-[#f4f3f9] border border-slate-200/80 rounded-xl px-3 py-2">
+          <div className="flex items-center space-x-1.5 bg-[#f4f3f9] border border-slate-200/80 rounded-xl px-3 py-2 flex-1 xs:flex-initial">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Filter by status"
-              className="bg-transparent text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
+              className="w-full bg-transparent text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
             >
               <option value="ALL">All Statuses</option>
               <option value="ANALYZED">Analyzed</option>
@@ -82,21 +82,21 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
             </select>
           </div>
 
-          <div className="flex items-center space-x-1.5 bg-[#f4f3f9] border border-slate-200/80 rounded-xl px-3 py-2">
-            <ArrowUpDown className="w-3.5 h-3.5 text-violet-600" />
+          <div className="flex items-center space-x-1.5 bg-[#f4f3f9] border border-slate-200/80 rounded-xl px-3 py-2 flex-1 xs:flex-initial">
+            <ArrowUpDown className="w-3.5 h-3.5 text-violet-600 shrink-0" />
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
               aria-label="Sort meetings"
-              className="bg-transparent text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
+              className="w-full bg-transparent text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
             >
               <option value="NEWEST">Newest First</option>
               <option value="OLDEST">Oldest First</option>
-              <option value="MOST_TURNS">Most Transcript Turns</option>
+              <option value="MOST_TURNS">Most Spoken Turns</option>
             </select>
           </div>
 
-          <span className="text-xs font-mono font-bold text-violet-700 bg-violet-50 px-3 py-2 rounded-xl border border-violet-200/80">
+          <span className="text-xs font-bold text-violet-700 bg-violet-50 px-3 py-2 rounded-xl border border-violet-200/80">
             {filtered.length} of {meetings.length}
           </span>
         </div>

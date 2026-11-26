@@ -351,7 +351,7 @@ export const PopupApp: React.FC = () => {
       }
 
       if (!meetRes.ok) {
-        throw new Error(`Failed creating meeting session on ${ep.serverOrigin}. Is the server running?`);
+        throw new Error('Unable to start a new meeting session right now. Please try again.');
       }
 
       const meetingData = await meetRes.json();
@@ -606,11 +606,11 @@ export const PopupApp: React.FC = () => {
           <span>→</span>
         </button>
 
-        {/* Server Endpoint Switcher (AWS EC2 / Localhost) */}
+        {/* Workspace Connection Switcher */}
         <div className="vx-card" style={{ padding: '8px 10px', gap: '6px' }}>
           <div className="vx-row-between" style={{ fontSize: '10.5px' }}>
             <span style={{ color: '#64748b', fontWeight: 700 }}>
-              Server: <strong style={{ color: '#1e1b4b' }}>{endpoints.serverOrigin}</strong>
+              Workspace: <strong style={{ color: '#1e1b4b' }}>Vinxa Cloud</strong>
             </span>
             <button
               type="button"
@@ -618,14 +618,14 @@ export const PopupApp: React.FC = () => {
               className="vx-btn-ghost"
               style={{ color: '#7c3aed', padding: '1px 5px', fontSize: '10px' }}
             >
-              {showServerEditor ? 'Close' : 'Change EC2 / Host'}
+              {showServerEditor ? 'Close' : 'Connection Settings'}
             </button>
           </div>
           {showServerEditor && (
             <div style={{ display: 'flex', gap: '5px', marginTop: '2px' }}>
               <input
                 type="text"
-                placeholder="http://<EC2_PUBLIC_IP> or http://localhost:8080"
+                placeholder="https://vinxa.ogakash.xyz"
                 value={serverInput}
                 onChange={(e) => setServerInput(e.target.value)}
                 className="vx-input"
@@ -799,9 +799,9 @@ export const PopupApp: React.FC = () => {
               onClick={handleCenterOnScreenHud}
               className="vx-btn-ghost"
               style={{ color: '#7c3aed', padding: '2px 6px', fontSize: '10px' }}
-              title="Show and center the On-Screen Transcript HUD on the meeting page"
+              title="Show and center the On-Screen Captions on the meeting page"
             >
-              Center On-Screen HUD
+              Center Captions
             </button>
           )}
         </div>
@@ -813,7 +813,7 @@ export const PopupApp: React.FC = () => {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <span style={{ fontSize: '10.5px', color: '#475569', fontWeight: 600 }}>
-            Spoken Audio Recognition (Deepgram Nova-2):
+            Spoken Audio Language:
           </span>
           <select
             value={language}
@@ -840,7 +840,7 @@ export const PopupApp: React.FC = () => {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '2px' }}>
           <span style={{ fontSize: '10.5px', color: '#475569', fontWeight: 600 }}>
-            Live On-Screen Bilingual Translation (Gemini):
+            Live On-Screen Bilingual Translation:
           </span>
           <select
             value={targetTranslation}
@@ -1065,7 +1065,7 @@ export const PopupApp: React.FC = () => {
               disabled={!consentGiven || loading}
               className="vx-btn vx-btn-primary"
             >
-              {loading ? 'Initializing Audio Pipeline...' : 'Start Live Meeting Capture'}
+              {loading ? 'Starting Live Captions...' : 'Start Live Meeting Capture'}
             </button>
           ) : (
             <button
@@ -1074,7 +1074,7 @@ export const PopupApp: React.FC = () => {
               disabled={loading}
               className="vx-btn vx-btn-danger"
             >
-              {loading ? 'Generating AI Summary...' : '⏹ Stop & Finalize Meeting'}
+              {loading ? 'Generating Summary...' : '⏹ Stop & Finalize Meeting'}
             </button>
           )}
         </div>
@@ -1093,29 +1093,29 @@ export const PopupApp: React.FC = () => {
         <button
           type="button"
           onClick={() => setShowServerEditor(!showServerEditor)}
-          title={`Connected Server: ${endpoints.serverOrigin}`}
+          title="Connection Settings"
           className="vx-btn-ghost"
           style={{ fontSize: '10px' }}
         >
-          {endpoints.isLocal ? '🌐 Localhost' : `☁️ EC2 (${endpoints.serverOrigin.replace(/^https?:\/\//, '')})`}
+          ☁️ Connected
         </button>
         <button
           type="button"
           onClick={handleResetCapture}
-          title="Reset audio capture engine"
+          title="Refresh audio capture"
           className="vx-btn-ghost"
         >
-          Reset Engine
+          Refresh Audio
         </button>
       </div>
 
       {showServerEditor && (
         <div className="vx-card" style={{ padding: '8px 10px', gap: '6px' }}>
-          <span className="vx-label">Vinxa Server Endpoint (AWS EC2 IP or Localhost)</span>
+          <span className="vx-label">Workspace Service URL</span>
           <div style={{ display: 'flex', gap: '5px' }}>
             <input
               type="text"
-              placeholder="http://<EC2_PUBLIC_IP> or http://localhost:8080"
+              placeholder="https://vinxa.ogakash.xyz"
               value={serverInput}
               onChange={(e) => setServerInput(e.target.value)}
               className="vx-input"
